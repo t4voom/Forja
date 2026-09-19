@@ -62,6 +62,10 @@
     });
   }
 
+  // "18 de setembro" (o ano não aparece; só dia e mês importam)
+  const MONTHS_LONG = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const fmtBirthday = (v) => { const [, m, d] = v.split('-').map(Number); return `${d} de ${MONTHS_LONG[m - 1]}`; };
+
   // Valor de peso para exibir em um campo editável (na unidade atual)
   const weightInputValue = (kg) => (kg ? U.fmtNum(U.round(U.toUnit(kg), 1), 1).replace(/\./g, '') : '');
 
@@ -92,7 +96,10 @@
       const name = U.firstName(profile.name);
       const workout = Workouts.next();
       const live = Sessions.active();
-      const week = Statistics.calculateWeeklyStats(Sessions.all());
+      const history = Sessions.all();
+      const week = Statistics.calculateWeeklyStats(history);
+      const streak = Statistics.streakInfo(history);
+      const insights = Statistics.generateInsights(history, Store.get('bodyweight'));
       const time = U.durationParts(week.durationSec);
       const now = new Date();
 
@@ -109,7 +116,7 @@
           </header>
 
           <div class="mt-12" style="--i:2">
-            <p class="t-eyebrow mb-4">${live ? 'Treino em andamento' : workout ? 'Seu próximo treino' : 'Comece por aqui'}</p>
+            <p class="t-eyebrow mb-4">${live ? 'Treino de hoje' : workout ? 'Seu próximo treino' : 'Comece por aqui'}</p>
             ${live ? Home.heroLive(live) : workout ? Home.heroWorkout(workout) : Home.heroEmpty()}
           </div>
 
@@ -131,7 +138,20 @@
             </div>
             ${week.count ? '' : '<p class="t-footnote mt-6">Sua semana começa no primeiro treino.</p>'}
           </div>
+
+          ${streak.days || insights.length ? `
+            <div class="section" style="--i:4">
+              ${streak.days ? `
+                <button type="button" class="streak-chip" data-action="progress">
+                  ${icon('flame', { size: 18, stroke: 1.8 })}<span class="num">${streak.days}</span> ${streak.days === 1 ? 'dia de sequência' : 'dias de sequência'}
+                </button>` : ''}
+              ${insights.length ? `
+                <ul class="insights ${streak.days ? 'mt-5' : ''}">
+                  ${insights.slice(0, 3).map((i) => `<li class="insight"><span class="insight-icon">${icon(i.icon, { size: 18, stroke: 1.8 })}</span><span>${esc(i.text)}</span></li>`).join('')}
+                </ul>` : ''}
+            </div>` : ''}
         </section>`;
+      root.querySelectorAll('[data-action="progress"]').forEach((b) => b.addEventListener('click', () => Router.go('progress')));
 
       root.querySelectorAll('[data-action="create"]').forEach((b) => b.addEventListener('click', () => Workouts.openCreate()));
       root.querySelectorAll('[data-action="open"]').forEach((b) => b.addEventListener('click', () => Router.go(`workouts/${b.dataset.id}`)));
@@ -195,6 +215,7 @@
       const p = Store.get('profile') || {};
       const s = Store.get('settings');
       const t = Statistics.calculateTotals(Sessions.all());
+      const streak = Statistics.streakInfo(Sessions.all());
       const vibrationSupported = typeof navigator.vibrate === 'function';
 
       const row = (key, label, value, iconName) => `
@@ -233,6 +254,7 @@
                 ${row('height', 'Altura', p.heightCm ? `${p.heightCm} cm` : '', 'ruler')}
                 ${row('goal', 'Objetivo', esc(labelOf(GOALS, p.goal)), 'target')}
                 ${row('experience', 'Experiência', esc(labelOf(EXPERIENCE, p.experience)), 'bolt')}
+                ${row('birthDate', 'Aniversário', p.birthDate ? fmtBirthday(p.birthDate) : '', 'gift')}
               </div>
             </div>
 
@@ -244,6 +266,8 @@
                 ${stat('Repetições', U.fmtNum(t.reps))}
                 ${stat('Volume total', U.fmtVolume(t.volume))}
                 ${stat('Tempo treinando', U.fmtDuration(t.durationSec))}
+                ${stat('Sequência atual', U.plural(streak.days, 'dia', 'dias'))}
+                ${stat('Maior sequência', U.plural(streak.best, 'dia', 'dias'))}
               </div>
             </div>
 
@@ -338,7 +362,36 @@
         UI.choiceSheet({ title: 'Objetivo', options: GOALS, value: p.goal, onSelect: (goal) => Profile.save({ goal }) });
       } else if (field === 'experience') {
         UI.choiceSheet({ title: 'Experiência', options: EXPERIENCE, value: p.experience, onSelect: (experience) => Profile.save({ experience }) });
+      } else if (field === 'birthDate') {
+        Profile.editBirthday(p.birthDate || '');
       }
+    },
+
+    // Opcional: só serve para a conquista "Treino de aniversário"
+    editBirthday(value) {
+      const today = U.dayKey(new Date());
+      const body = U.h(`
+        <form class="form" novalidate>
+          <label class="form-label" for="birth">Data de nascimento</label>
+          <input id="birth" class="field" type="date" min="1900-01-01" max="${today}" value="${esc(value)}">
+          <p class="field-error" data-err></p>
+          <p class="t-footnote mx-1">Usada apenas para a conquista “Treino de aniversário”. Fica só neste aparelho.</p>
+          ${value ? '<button type="button" class="btn btn-ghost is-muted btn-block mt-4" data-clear>Remover data</button>' : ''}
+        </form>`);
+      const footer = U.h('<button type="button" class="btn btn-primary btn-block">Salvar</button>');
+      const sheet = UI.openSheet({ title: 'Aniversário', body, footer });
+      const save = () => {
+        const v = body.querySelector('#birth').value;
+        const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T12:00:00`) : null;
+        const err = body.querySelector('[data-err]');
+        if (!d || Number.isNaN(d.getTime())) { err.textContent = 'Escolha uma data válida.'; return; }
+        if (d > new Date() || d.getFullYear() < 1900) { err.textContent = 'Essa data não parece certa.'; return; }
+        sheet.close('save');
+        Profile.save({ birthDate: v });
+      };
+      footer.addEventListener('click', save);
+      body.addEventListener('submit', (e) => { e.preventDefault(); save(); });
+      body.querySelector('[data-clear]')?.addEventListener('click', () => { sheet.close(); Profile.save({ birthDate: null }); });
     },
 
     confirmReset() {
@@ -363,7 +416,7 @@
     { route: 'home', label: 'Início', icon: 'home', title: 'FORJA', render: (el) => Home.render(el) },
     { route: 'workouts', label: 'Treinos', icon: 'dumbbell', title: 'Treinos', render: (el, p) => Workouts.renderScreen(el, p) },
     { route: 'exercises', label: 'Exercícios', icon: 'list', title: 'Exercícios', render: (el) => global.Exercises.renderScreen(el) },
-    { route: 'progress', label: 'Evolução', icon: 'chart', title: 'Evolução', render: (el) => global.Progress.renderScreen(el) },
+    { route: 'progress', label: 'Evolução', icon: 'chart', title: 'Evolução', render: (el, p) => global.Progress.renderScreen(el, p) },
     { route: 'profile', label: 'Perfil', icon: 'user', title: 'Perfil', render: (el) => Profile.render(el) }
   ];
 
@@ -422,6 +475,8 @@
       if (keepScroll || samePath) y = global.scrollY;
       else if (motion !== 'screen-push') y = scrollMemory[next.path] || 0;
       $('#view').replaceChildren(screen);
+      // Telas que precisam de medidas reais (gráficos) desenham aqui, já no documento
+      if (typeof screen.onMount === 'function') screen.onMount();
       global.scrollTo(0, y);
 
       current = next;

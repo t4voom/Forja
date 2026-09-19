@@ -118,6 +118,12 @@
   const fmtDayMonth = (d) => { d = new Date(d); return `${pad(d.getDate())} ${MONTHS[d.getMonth()]}`; };
   const fmtWeekdayDate = (d) => { d = new Date(d); return `${WEEKDAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 
+  const MONTHS_LONG = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const WEEKDAYS_LONG = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  const fmtMonthYear = (d) => { d = new Date(d); const m = MONTHS_LONG[d.getMonth()]; return `${m[0].toUpperCase()}${m.slice(1)} ${d.getFullYear()}`; };
+  // "Sexta, 18 de setembro · 18:32"
+  const fmtLongDate = (d) => { d = new Date(d); return `${WEEKDAYS_LONG[d.getDay()]}, ${d.getDate()} de ${MONTHS_LONG[d.getMonth()]} · ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+
   function greeting(d = new Date()) {
     const hr = d.getHours();
     if (hr >= 5 && hr < 12) return 'Bom dia';
@@ -177,7 +183,13 @@
     edit: '<path d="M4.75 19.25h4l10-10a2.83 2.83 0 0 0-4-4l-10 10z"/><path d="m13.25 6.75 4 4"/>',
     arrowUp: '<path d="M12 19.5v-15M6 10.5l6-6 6 6"/>',
     arrowDown: '<path d="M12 4.5v15M6 13.5l6 6 6-6"/>',
-    play: '<path d="M7.75 5.5v13l10.5-6.5z" fill="currentColor"/>'
+    play: '<path d="M7.75 5.5v13l10.5-6.5z" fill="currentColor"/>',
+    barbell: '<path d="M2.75 12h18.5"/><rect x="5" y="7.25" width="3" height="9.5" rx="1"/><rect x="16" y="7.25" width="3" height="9.5" rx="1"/>',
+    gift: '<rect x="4" y="9.5" width="16" height="10.75" rx="2"/><path d="M3.25 9.5h17.5V7.25a1 1 0 0 0-1-1H4.25a1 1 0 0 0-1 1zM12 6.25v14M12 6.25C10.5 3 7 3.25 7.25 5c.2 1.25 2.5 1.25 4.75 1.25zM12 6.25C13.5 3 17 3.25 16.75 5c-.2 1.25-2.5 1.25-4.75 1.25z"/>',
+    swap: '<path d="M4.75 8.25h13.5M15 4.5l3.75 3.75L15 12M19.25 15.75H5.75M9 12l-3.75 3.75L9 19.5"/>',
+    image: '<rect x="3.75" y="4.75" width="16.5" height="14.5" rx="3"/><circle cx="9" cy="9.75" r="1.5"/><path d="m4.5 17.5 4.75-4.75 3.5 3.5 2.5-2.5 4.25 4.25"/>',
+    share: '<path d="M12 3.75v11M7.75 8 12 3.75 16.25 8"/><path d="M7.25 11.25h-1.5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h12.5a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2h-1.5"/>',
+    download: '<path d="M12 3.75v11M7.75 10.5 12 14.75l4.25-4.25M4.75 16.75v1.5a2 2 0 0 0 2 2h10.5a2 2 0 0 0 2-2v-1.5"/>'
   };
 
   function icon(name, { size = 24, stroke = 1.6, cls = '' } = {}) {
@@ -190,7 +202,7 @@
     fmtNum, parseDecimal,
     LB_PER_KG, currentUnit, toUnit, fromUnit, fmtWeight, fmtVolume,
     pad, fmtDuration, durationParts, fmtClock,
-    MONTHS, WEEKDAYS, dayKey, startOfDay, addDays, startOfWeek, fmtDayMonth, fmtWeekdayDate, greeting,
+    MONTHS, WEEKDAYS, dayKey, startOfDay, addDays, startOfWeek, fmtDayMonth, fmtWeekdayDate, fmtMonthYear, fmtLongDate, greeting,
     normalize, plural, firstName, initial,
     haptic, icon, ICONS
   };
@@ -472,6 +484,18 @@
     return sheet;
   }
 
+  /* ---------- Navbar das telas internas (voltar + título compacto + ações) ---------- */
+  function navbarHTML(title, backLabel, actions = '') {
+    return `
+      <nav class="navbar">
+        <button type="button" class="nav-back" data-back aria-label="Voltar para ${esc(backLabel)}">
+          ${icon('chevronLeft', { size: 24, stroke: 2 })}<span>${esc(backLabel)}</span>
+        </button>
+        <span class="navbar-title">${esc(title)}</span>
+        <div class="navbar-actions">${actions}</div>
+      </nav>`;
+  }
+
   /* ---------- Sheets prontos ---------- */
 
   // Campo único (texto ou número) com validação
@@ -545,5 +569,5 @@
     return sheet;
   }
 
-  global.UI = { openSheet, closeAllSheets, toast, segmented, toggle, stepper, sortable, actionSheet, inputSheet, choiceSheet, confirmSheet };
+  global.UI = { openSheet, closeAllSheets, toast, segmented, toggle, stepper, sortable, actionSheet, navbarHTML, inputSheet, choiceSheet, confirmSheet };
 })(window);
