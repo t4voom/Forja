@@ -23,6 +23,26 @@
   function last() { return all()[0] || null; }
   function lastForWorkout(workoutId) { return all().find((s) => s.workoutId === workoutId) || null; }
   function active() { return Store.get('active'); }
+  function get(id) { return Store.get('sessions').find((s) => s.id === id) || null; }
+
+  // Todas as séries de trabalho já registradas de um exercício (base para recordes)
+  function priorSetsFor(exerciseId) {
+    return Store.get('sessions').flatMap((s) => (s.exercises || [])
+      .filter((e) => e.exerciseId === exerciseId)
+      .flatMap((e) => (e.sets || []).filter(Statistics.isWorkingSet)));
+  }
+
+  // Excluir do histórico (recordes e estatísticas são recalculados), com desfazer
+  function removeSession(id, after) {
+    const s = get(id);
+    if (!s) return;
+    Store.update('sessions', (list) => list.filter((x) => x.id !== id));
+    if (after) after();
+    UI.toast(`${s.name} removido do histórico`, {
+      iconName: 'trash', action: 'Desfazer', duration: 6000,
+      onAction: () => { Store.update('sessions', (list) => { list.push(s); }); global.App.Router.refresh(); }
+    });
+  }
 
   // Última vez que o exercício foi feito (apenas séries de trabalho)
   function lastPerformance(exerciseId) {
@@ -50,11 +70,72 @@
     return !!target && ws.length >= target.sets && ws.every((s) => s.reps >= target.repMax) && ws.some((s) => s.weightKg > 0);
   }
 
-  function suggestion(exerciseId, target, equipment) {
-    const lp = lastPerformance(exerciseId);
-    if (!lp || !reachedTop(lp.sets, target)) return null;
-    const from = Math.max(...lp.sets.map((s) => s.weightKg || 0));
-    return { from, to: nextLoad(from, equipment) };
+  /* ==========================================================================
+     Smart Coach — lê as últimas vezes do exercício (séries, reps e o RPE do treino)
+     e sugere o próximo passo. Progressão dupla: completa a faixa de reps → sobe a carga.
+     Sempre uma sugestão com botão; nunca muda nada sozinho.
+     ========================================================================== */
+  function recentPerformances(exerciseId, n = 2) {
+    const out = [];
+    for (const s of all()) {
+      const ex = (s.exercises || []).find((e) => e.exerciseId === exerciseId);
+      if (!ex) continue;
+      const sets = (ex.sets || []).filter(Statistics.isWorkingSet);
+      if (!sets.length) continue;
+      out.push({ date: s.startedAt, sets, rpe: s.rpe ?? null });
+      if (out.length >= n) break;
+    }
+    return out;
+  }
+
+  function loadStep(equipment, kg) {
+    if (U.currentUnit() === 'lb') return U.fromUnit(equipment === 'Halteres' ? 2.5 : 5, 'lb');
+    return equipment === 'Halteres' || kg < 10 ? 1 : 2.5;
+  }
+
+  function coachAdvice(exerciseId, target, equipment) {
+    if (!target) return null;
+    const perf = recentPerformances(exerciseId, 2);
+    if (!perf.length) return null;
+    const last = perf[0];
+    const top = Math.max(...last.sets.map((s) => s.weightKg || 0));
+    const main = last.sets.filter((s) => (s.weightKg || 0) === top);        // séries com a carga principal
+    const reps = main.map((s) => s.reps);
+    const repText = reps.every((r) => r === reps[0]) ? `${main.length}×${reps[0]}` : `${reps.join('/')} reps`;
+    const done = `${repText} com ${U.fmtWeight(top, { dec: 2 })}`;
+    const rpe = last.rpe != null ? ` (RPE ${last.rpe})` : '';
+    const complete = last.sets.length >= target.sets;
+    const allMax = complete && last.sets.every((s) => s.reps >= target.repMax);
+    const inRange = reps.every((r) => r >= target.repMin);
+    const failed = reps.some((r) => r < target.repMin);
+    const easy = last.rpe != null && last.rpe <= 7;
+
+    // Peso corporal: a progressão é em repetições
+    if (top <= 0) {
+      if (inRange && !allMax) return { kind: 'reps', title: 'Busque mais repetições', text: `No último treino você fez ${repText}${rpe}. Tente 1 repetição a mais por série.`, from: 0, to: 0, reps: Math.min(target.repMax, Math.max(...reps) + 1) };
+      return null;
+    }
+    if (allMax || (easy && inRange && complete)) {
+      const to = nextLoad(top, equipment);
+      const why = allMax ? `e chegou ao topo da faixa (${target.repMax} reps)` : 'com facilidade';
+      return { kind: 'increase', title: 'Hora de subir a carga', text: `No último treino você fez ${done} ${why}${rpe}. Tente ${U.fmtWeight(to, { dec: 2 })} hoje.`, from: top, to };
+    }
+    if (failed) {
+      const prev = perf[1];
+      const prevTop = prev ? Math.max(...prev.sets.map((s) => s.weightKg || 0)) : null;
+      const prevFailed = prev && prevTop === top && prev.sets.filter((s) => (s.weightKg || 0) === top).some((s) => s.reps < target.repMin);
+      if (prevFailed) {
+        const step = loadStep(equipment, top);
+        const to = Math.max(step, Math.floor((top * 0.9) / step) * step);
+        return { kind: 'deload', title: 'Um passo atrás para subir', text: `Nos dois últimos treinos algumas séries ficaram abaixo de ${target.repMin} reps com ${U.fmtWeight(top, { dec: 2 })}. Que tal ${U.fmtWeight(to, { dec: 2 })} hoje, completando a faixa com boa execução?`, from: top, to };
+      }
+      return { kind: 'hold', title: 'Mantenha a carga', text: `No último treino você fez ${done}${rpe}, abaixo de ${target.repMin} reps em alguma série. Mantenha ${U.fmtWeight(top, { dec: 2 })} e tente completar a faixa.`, from: top, to: top };
+    }
+    return {
+      kind: 'reps', title: 'Busque mais repetições',
+      text: `No último treino você fez ${done}${rpe}. Mantenha ${U.fmtWeight(top, { dec: 2 })} e busque 1 repetição a mais por série até chegar a ${target.repMax}.`,
+      from: top, to: top, reps: Math.min(target.repMax, Math.max(...reps) + 1)
+    };
   }
 
   /* ==========================================================================
@@ -107,12 +188,13 @@
     mutate((a) => { Object.assign(a.exercises[ei].sets[si], patch, { touched: true }); });
   }
 
-  function completeSet(ei, si) {
+  function completeSet(ei, si, records = []) {
     mutate((a) => {
       const ex = a.exercises[ei];
       const s = ex.sets[si];
       s.done = true;
       s.completedAt = now();
+      if (records.length) s.records = records; else delete s.records;
       delete ex.focus;
       // Se a carga mudou em relação ao plano, a próxima série acompanha (a menos que você já a tenha ajustado)
       const next = ex.sets.find((x, i) => i > si && !x.done);
@@ -176,12 +258,26 @@
     };
   }
 
+  // A sessão exatamente como será salva (também usada no card de compartilhamento antes de salvar)
+  function previewSession() {
+    const a = active();
+    return a ? buildSession(a) : null;
+  }
+
   function finishWorkout() {
     const a = active();
     if (!a) return null;
+    const session = buildSession(a);
+    // Primeiro grava no histórico; só depois encerra o treino em andamento (nunca os dois perdidos)
+    if (!Store.get('sessions').some((s) => s.id === a.id)) Store.update('sessions', (list) => { list.push(session); });
+    Store.set('active', null);
+    return session;
+  }
+
+  function buildSession(a) {
     const sum = summary(a);
     const f = a.finishing || {};
-    const session = {
+    return {
       id: a.id, workoutId: a.workoutId, name: a.name, color: a.color,
       startedAt: a.startedAt, endedAt: f.endedAt || now(), durationSec: sum.durationSec,
       exercises: sum.exercises.map((ex) => ({
@@ -190,10 +286,6 @@
       })),
       rpe: f.rpe ?? null, mood: f.mood ?? null, notes: String(f.notes || '').trim()
     };
-    // Primeiro grava no histórico; só depois encerra o treino em andamento (nunca os dois perdidos)
-    if (!Store.get('sessions').some((s) => s.id === a.id)) Store.update('sessions', (list) => { list.push(session); });
-    Store.set('active', null);
-    return session;
   }
 
   function discard() {
@@ -316,10 +408,11 @@
   function promptRecovery() {
     const a = active();
     if (!a) return;
-    const since = U.fmtDuration((Date.now() - new Date(a.startedAt)) / 1000);
+    const secs = (Date.now() - new Date(a.startedAt)) / 1000;
+    const since = secs < 60 ? 'agora há pouco' : `há ${U.fmtDuration(secs)}`;
     UI.confirmSheet({
       title: 'Treino em andamento',
-      message: `Você possui um treino não finalizado: ${a.name}, iniciado há ${since} · ${U.plural(doneCount(a), 'série registrada', 'séries registradas')}.`,
+      message: `Você possui um treino não finalizado: ${a.name}, iniciado ${since} · ${U.plural(doneCount(a), 'série registrada', 'séries registradas')}.`,
       confirmLabel: 'Continuar', cancelLabel: 'Descartar',
       onConfirm: open, onCancel: discardFlow
     });
@@ -360,7 +453,7 @@
     const exDone = ex.sets.length > 0 && cur === -1;
     const isLast = i === a.exercises.length - 1;
     const lp = lastPerformance(ex.exerciseId);
-    const sug = !ex.sets.some((s) => s.done) ? suggestion(ex.exerciseId, ex.target, ex.equipment) : null;
+    const coach = !ex.sets.some((s) => s.done) ? coachAdvice(ex.exerciseId, ex.target, ex.equipment) : null;
     const topNow = exDone && reachedTop(ex.sets, ex.target);
     const nextEx = a.exercises[i + 1];
 
@@ -388,14 +481,20 @@
             <span>${esc(a.name)}</span><span class="num">${i + 1} / ${a.exercises.length}</span>${icon('chevronDown', { size: 14, stroke: 2.4 })}
           </button>
           <h1 class="tr-name">${esc(ex.name)}</h1>
-          <p class="tr-target">${esc(ex.muscle)} · <span class="num">${schemeText(ex.target)}</span></p>
+          <div class="tr-target-row">
+            <p class="tr-target">${esc(ex.muscle)} · <span class="num">${schemeText(ex.target)}</span></p>
+            <button type="button" class="swap-btn" data-swap aria-label="Trocar exercício">${icon('swap', { size: 15, stroke: 2 })} Trocar</button>
+          </div>
+          ${ex.swappedFrom ? `<p class="t-footnote mt-1">No lugar de ${esc((global.Exercises.get(ex.swappedFrom) || {}).name || 'outro exercício')}</p>` : ''}
 
-          ${sug ? `
-            <div class="tr-tip">
-              <p class="t-eyebrow t-accent">Você chegou ao topo</p>
-              <p class="t-callout mt-1">Da última vez você fez ${ex.target.repMax}+ reps em todas as séries. Talvez seja hora de aumentar a carga.</p>
-              <p class="tr-tip-load num">${wNum(sug.from)} → ${wNum(sug.to)} <small>${unit()}</small></p>
-              <button type="button" class="btn btn-secondary btn-sm" data-apply="${sug.to}">Usar ${wNum(sug.to)} ${unit()}</button>
+          ${coach ? `
+            <div class="coach coach-${coach.kind}">
+              <p class="coach-head">${icon('sparkle', { size: 15, stroke: 1.8 })} Coach</p>
+              <p class="coach-title">${esc(coach.title)}</p>
+              <p class="t-callout mt-1">${esc(coach.text)}</p>
+              ${coach.to !== coach.from ? `<p class="tr-tip-load num">${wNum(coach.from)} → ${wNum(coach.to)} <small>${unit()}</small></p>` : ''}
+              ${coach.to !== coach.from ? `<button type="button" class="btn btn-secondary btn-sm mt-1" data-apply="${coach.to}">Usar ${wNum(coach.to)} ${unit()}</button>`
+                : coach.reps ? `<button type="button" class="btn btn-secondary btn-sm mt-3" data-apply-reps="${coach.reps}">Meta: ${coach.reps} reps</button>` : ''}
             </div>` : ''}
 
           <section class="tr-last">
@@ -412,6 +511,10 @@
           ${exDone ? `
             <div class="tr-done">
               <p class="tr-done-title">${icon('check', { size: 18, stroke: 2.4 })} Exercício concluído</p>
+              ${(() => {
+                const e1 = Math.max(0, ...ex.sets.filter((s) => s.done).map(Statistics.estimated1RMForSet));
+                return e1 ? `<p class="t-callout mt-2">1RM estimado hoje: <span class="t-body num">${wNum(U.round(e1, 1))} ${unit()}</span></p>` : '';
+              })()}
               ${topNow ? `<p class="t-callout mt-2">Você chegou ao topo da faixa em todas as séries. Na próxima, experimente ${wNum(nextLoad(Math.max(...ex.sets.filter((s) => s.done).map((s) => s.weightKg || 0)), ex.equipment))} ${unit()}.</p>` : ''}
               ${nextEx ? `<p class="t-callout mt-2">Próximo: <span class="t-body">${esc(nextEx.name)}</span></p>` : ''}
             </div>` : ''}
@@ -425,12 +528,15 @@
       </div>`;
   }
 
+  // Valor grande no topo (toque para digitar) e − + logo abaixo, como no layout da especificação
   const fieldHTML = (key, label, value, suffix) => `
     <div class="tr-field" data-field="${key}">
       <span class="tr-label">${label}</span>
+      <button type="button" class="tr-value num" data-type="${key}" aria-label="Digitar ${label.toLowerCase()}">
+        <span data-value class="${value === '—' ? 'is-empty' : ''}">${value}</span>${suffix ? `<small>${suffix}</small>` : ''}
+      </button>
       <div class="tr-control">
         <button type="button" class="tr-step" data-step="-1" aria-label="Diminuir ${label.toLowerCase()}">${icon('minus', { size: 18, stroke: 2.2 })}</button>
-        <button type="button" class="tr-value num" data-type="${key}" aria-label="Digitar ${label.toLowerCase()}"><span data-value>${value}</span>${suffix ? `<small>${suffix}</small>` : ''}</button>
         <button type="button" class="tr-step" data-step="1" aria-label="Aumentar ${label.toLowerCase()}">${icon('plus', { size: 18, stroke: 2.2 })}</button>
       </div>
     </div>`;
@@ -454,7 +560,7 @@
       return `
         <li class="tr-set is-done${justDone ? ' just-done' : ''}" data-set="${si}" role="button" tabindex="0">
           <span class="tr-set-mark">${icon('check', { size: 14, stroke: 2.8 })}</span>
-          <span class="tr-set-label">Série ${si + 1}</span>
+          <span class="tr-set-label">Série ${si + 1}${s.records && s.records.length ? `<span class="pr-badge" title="Recorde">${icon('trophy', { size: 13, stroke: 2 })}</span>` : ''}</span>
           <span class="tr-set-value num">${setText(s)}</span>
         </li>`;
     }
@@ -476,6 +582,7 @@
     const f = a.finishing;
     const t = U.durationParts(s.durationSec);
     const pending = plannedCount(a) - doneCount(a);
+    const recs = sessionRecords(a);
     return `
       <div class="tr-frame is-summary">
         <header class="tr-top">
@@ -498,6 +605,18 @@
           </div>
           ${pending > 0 ? `<p class="t-footnote mt-5">${pending === 1 ? '1 série planejada não foi feita e não entra' : `${pending} séries planejadas não foram feitas e não entram`} no histórico.</p>` : ''}
 
+          ${recs.length ? `
+            <section class="section">
+              <p class="t-eyebrow t-accent mb-4 flex items-center gap-2">${icon('trophy', { size: 14, stroke: 2 })} ${recs.length === 1 ? 'Novo recorde' : `${recs.length} novos recordes`}</p>
+              <div class="group">
+                ${recs.map((e) => `
+                  <div class="row">
+                    <span class="row-main"><span class="row-title block">${esc(e.name)}</span><span class="row-sub block">${e.types.map((t) => Statistics.RECORD_LABEL[t]).join(' · ')}</span></span>
+                    <span class="row-value num t-accent">${recordValueText(e.primary)}</span>
+                  </div>`).join('')}
+              </div>
+            </section>` : ''}
+
           <section class="section">
             <p class="t-eyebrow mb-5">Como foi?</p>
 
@@ -518,6 +637,7 @@
         </main>
 
         <footer class="tr-foot">
+          <button type="button" class="icon-btn tr-nav" data-share aria-label="Compartilhar treino">${icon('share', { size: 22, stroke: 1.8 })}</button>
           <button type="button" class="btn btn-primary btn-block tr-main" data-save>Salvar treino</button>
         </footer>
       </div>`;
@@ -562,12 +682,15 @@
     if (hit('[data-min]')) return minimize();
     if (hit('[data-resume]')) { cancelFinish(); return render('tr-in-prev'); }
     if (hit('[data-save]')) return save();
+    if (hit('[data-share]')) return global.Share.open(previewSession());
     if (hit('[data-finish]')) return askFinish();
     if (hit('[data-toc]')) return openToc();
     const g = hit('[data-go]'); if (g) return go(Number(g.dataset.go));
     if (hit('[data-complete]')) return complete();
     if (hit('[data-add-set]')) { addSet(a.cursor); return render(); }
     const ap = hit('[data-apply]'); if (ap) return applyLoad(Number(ap.dataset.apply));
+    const ar = hit('[data-apply-reps]'); if (ar) return applyReps(Number(ar.dataset.applyReps));
+    if (hit('[data-swap]')) return openSwap();
     const st = hit('[data-step]'); if (st) return step(st.closest('[data-field]').dataset.field, Number(st.dataset.step));
     const ty = hit('[data-type]'); if (ty) return typeValue(ty.dataset.type);
     const rpe = hit('[data-rpe]'); if (rpe) return pickRpe(Number(rpe.dataset.rpe));
@@ -606,7 +729,7 @@
     }
     setValues(ei, si, patch);
     const out = root().querySelector(`[data-field="${field}"] [data-value]`);
-    if (out) { out.textContent = field === 'weight' ? wNum(patch.weightKg) : String(patch.reps); bump(out); }
+    if (out) { out.textContent = field === 'weight' ? wNum(patch.weightKg) : String(patch.reps); out.classList.remove('is-empty'); bump(out); }
   }
 
   function parseWeight(v) {
@@ -651,12 +774,132 @@
     const s = ex.sets[si];
     if (s.weightKg == null) return typeValue('weight', 'Informe a carga desta série. Use 0 para peso corporal.');
     if (!s.reps || s.reps < 1) return typeValue('reps');
-    completeSet(ei, si);
-    U.haptic('success');
+    // Recorde: compara com o histórico e com as séries já feitas hoje neste exercício
+    const prior = priorSetsFor(ex.exerciseId).concat(ex.sets.filter((x, i) => i !== si && x.done && Statistics.isWorkingSet(x)));
+    const records = Statistics.detectSetRecords(prior, Object.assign({}, s, { done: true }));
+    completeSet(ei, si, records);
+    U.haptic(records.length ? 'record' : 'success');
     render('', { justDone: si });
+    if (records.length) showRecord(ex.name, s, records);
     // Mantém a próxima série visível
     const cur = root().querySelector('.tr-set.is-current, .tr-done');
     if (cur) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // Ao corrigir uma série concluída, o selo de recorde é recalculado
+  function refreshRecords(ei, si) {
+    const a = active();
+    const ex = a.exercises[ei];
+    const s = ex.sets[si];
+    if (!s || !s.done) return;
+    const prior = priorSetsFor(ex.exerciseId).concat(ex.sets.filter((x, i) => i !== si && x.done && Statistics.isWorkingSet(x)));
+    const records = Statistics.detectSetRecords(prior, s);
+    mutate((d) => { const t = d.exercises[ei].sets[si]; if (records.length) t.records = records; else delete t.records; });
+  }
+
+  /* ---------- Animação de novo recorde ---------- */
+  const RECORD_ORDER = ['weight', 'e1rm', 'reps'];
+
+  function showRecord(name, set, types) {
+    const L = Statistics.RECORD_LABEL;
+    const type = RECORD_ORDER.find((t) => types.includes(t));
+    const value = type === 'weight' ? `${wNum(set.weightKg)}<small>${unit()}</small>`
+      : type === 'e1rm' ? `${wNum(Statistics.estimated1RMForSet(set))}<small>${unit()}</small>`
+      : `${set.reps}<small>reps</small>`;
+    const detail = type === 'reps' ? `com ${wNum(set.weightKg)} ${unit()}` : `${shortSet(set)}`;
+    const others = types.filter((t) => t !== type).map((t) => L[t]);
+    const el = U.h(`
+      <div class="pr-overlay" role="alert" aria-live="assertive">
+        <div class="pr-card">
+          <div class="pr-icon">${icon('trophy', { size: 34, stroke: 1.6 })}</div>
+          <p class="t-eyebrow t-accent">Novo recorde</p>
+          <p class="pr-exercise">${esc(name)}</p>
+          <p class="pr-value num">${value}</p>
+          <p class="pr-sub">${L[type]} · ${detail}</p>
+          ${others.length ? `<p class="pr-extra">Também: ${others.join(' · ')}</p>` : ''}
+        </div>
+      </div>`);
+    root().appendChild(el);
+    requestAnimationFrame(() => el.classList.add('is-in'));
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      el.classList.remove('is-in');
+      el.classList.add('is-out');
+      setTimeout(() => el.remove(), 320);
+    };
+    el.addEventListener('click', close);
+    setTimeout(close, 2800);
+  }
+
+  // Recordes batidos no treino de hoje (inclui volume, que só fecha no fim do exercício)
+  function sessionRecords(a) {
+    const sum = summary(a);
+    const virtual = { id: a.id, startedAt: a.startedAt, exercises: sum.exercises };
+    return Statistics.groupRecords(Statistics.calculatePersonalRecords(all().filter((s) => s.id !== a.id).concat([virtual]))
+      .filter((e) => e.sessionId === a.id));
+  }
+
+  const recordValueText = (e) => (e.type === 'reps' ? `${e.reps} reps · ${wNum(e.weightKg)} ${unit()}`
+    : e.type === 'volume' ? U.fmtVolume(e.value)
+    : `${wNum(e.value)} ${unit()}`);
+
+  function applyReps(reps) {
+    const a = active();
+    const ei = a.cursor;
+    mutate((d) => { d.exercises[ei].sets.forEach((s) => { if (!s.done) { s.reps = reps; s.touched = true; } }); });
+    render();
+    UI.toast(`Meta de ${reps} reps nas próximas séries`);
+  }
+
+  /* ---------- Substituição inteligente no meio do treino ----------
+     O substituto entra com o PRÓPRIO histórico de carga (entryFor busca a última vez dele).
+     Se já houver séries feitas, elas ficam; o substituto recebe só as séries restantes. */
+  function swapExercise(ei, newId) {
+    const a = active();
+    const ex = a.exercises[ei];
+    const done = ex.sets.filter((s) => s.done).length;
+    const remaining = Math.max(1, ex.sets.length - done);
+    const entry = entryFor({ exerciseId: newId, sets: remaining, repMin: ex.target.repMin, repMax: ex.target.repMax });
+    entry.target.sets = ex.target.sets;
+    entry.swappedFrom = ex.swappedFrom || ex.exerciseId;
+    mutate((d) => {
+      if (!done) d.exercises.splice(ei, 1, entry);
+      else {
+        d.exercises[ei].sets = d.exercises[ei].sets.filter((s) => s.done);
+        delete d.exercises[ei].focus;
+        d.exercises.splice(ei + 1, 0, entry);
+        d.cursor = ei + 1;
+      }
+    });
+    return { entry, kept: done };
+  }
+
+  function openSwap() {
+    const a = active();
+    const ex = a.exercises[a.cursor];
+    const done = ex.sets.filter((s) => s.done).length;
+    global.Exercises.openSubstitute({
+      exerciseId: ex.exerciseId,
+      subtitle: `No lugar de ${ex.name}`,
+      inUse: a.exercises.map((x) => x.exerciseId),
+      note: done ? `As ${done === 1 ? '1 série feita fica' : `${done} séries feitas ficam`} em ${ex.name}; o substituto recebe as séries restantes.` : '',
+      onPick: (newId) => {
+        const original = ex.swappedFrom || ex.exerciseId;
+        const { entry } = swapExercise(a.cursor, newId);
+        render('tr-in-next');
+        const w = global.Workouts.get(a.workoutId);
+        const inTemplate = w && w.exercises.some((x) => x.exerciseId === original);
+        UI.toast(`Trocado por ${entry.name}`, inTemplate ? {
+          iconName: 'swap', duration: 6000, action: 'Manter no treino',
+          onAction: () => {
+            global.Workouts.replaceExercise(a.workoutId, original, newId);
+            UI.toast(`${w.name} atualizado`);
+          }
+        } : { iconName: 'swap' });
+      }
+    });
   }
 
   function applyLoad(kg) {
@@ -714,6 +957,7 @@
         return;
       }
       setValues(ei, si, { weightKg: w.value, reps: r.value });
+      refreshRecords(ei, si);
       sheet.close('save');
       render();
     };
@@ -816,17 +1060,25 @@
   function save() {
     const notes = root().querySelector('#tr-notes');
     if (notes) updateFinish({ notes: notes.value });
+    const recCount = sessionRecords(active()).length;
+    const unlockedBefore = new Set(global.Progress.achievements().filter((a) => a.unlocked).map((a) => a.id));
     const session = finishWorkout();
     if (!session) return;
+    const fresh = global.Progress.achievements().filter((a) => a.unlocked && !unlockedBefore.has(a.id));
+    if (fresh.length) setTimeout(() => global.Progress.celebrate(fresh), 700);
     U.haptic('finish');
     hide();
     global.App.Router.go('home');
-    UI.toast('Treino salvo');
+    UI.toast(recCount ? `Treino salvo · ${recCount === 1 ? '1 recorde' : `${recCount} recordes`}` : 'Treino salvo', {
+      iconName: recCount ? 'trophy' : 'check', duration: 6000,
+      action: 'Compartilhar', onAction: () => global.Share.open(session)
+    });
   }
 
   global.Sessions = {
-    all, last, lastForWorkout, active, lastPerformance, suggestion, reachedTop, nextLoad, summary,
-    startWorkout, completeSet, setValues, finishWorkout, discard,
+    MOODS, RPE_TEXT,
+    all, get, last, lastForWorkout, active, lastPerformance, coachAdvice, reachedTop, nextLoad, summary, removeSession,
+    startWorkout, completeSet, setValues, finishWorkout, previewSession, discard,
     begin, open, minimize, promptRecovery, syncActiveBar, syncClock,
     isOpen: () => T.open
   };

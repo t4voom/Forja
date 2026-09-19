@@ -169,6 +169,22 @@
     });
   }
 
+  // Troca o exercício de um item mantendo séries e faixa de reps
+  function replaceItem(wid, itemId, newExerciseId) {
+    const ex = global.Exercises.get(newExerciseId);
+    if (!ex) return;
+    update(wid, (w) => {
+      const x = w.exercises.find((i) => i.id === itemId);
+      if (x) Object.assign(x, { exerciseId: ex.id, name: ex.name, muscle: ex.muscle });
+    });
+  }
+
+  function replaceExercise(wid, oldExerciseId, newExerciseId) {
+    const w = get(wid);
+    const item = w && w.exercises.find((x) => x.exerciseId === oldExerciseId);
+    if (item) replaceItem(wid, item.id, newExerciseId);
+  }
+
   function moveItem(wid, from, to) {
     update(wid, (w) => { w.exercises = U.moveItem(w.exercises, from, to); });
   }
@@ -288,6 +304,7 @@
 
         <div class="group mt-8 has-icons">
           <button type="button" class="row" data-view><span class="row-icon">${icon('info', { size: 20 })}</span><span class="row-main row-title">Ver exercício</span></button>
+          <button type="button" class="row" data-substitute><span class="row-icon">${icon('swap', { size: 20 })}</span><span class="row-main row-title">Substituir exercício</span></button>
           <button type="button" class="row is-danger" data-remove><span class="row-icon">${icon('trash', { size: 20 })}</span><span class="row-main row-title">Remover do treino</span></button>
         </div>
       </div>`);
@@ -318,6 +335,23 @@
     body.querySelector('[data-slot="repMax"]').appendChild(maxStep);
 
     body.querySelector('[data-view]').addEventListener('click', () => global.Exercises.openDetail(item.exerciseId));
+    body.querySelector('[data-substitute]').addEventListener('click', () => {
+      sheet.close('removed');
+      global.Exercises.openSubstitute({
+        exerciseId: item.exerciseId,
+        subtitle: `No lugar de ${info.name} em ${w.name}`,
+        inUse: w.exercises.map((x) => x.exerciseId),
+        onPick: (newId) => {
+          const before = item.exerciseId;
+          replaceItem(wid, itemId, newId);
+          Router().refresh();
+          UI.toast(`Substituído por ${global.Exercises.get(newId).name}`, {
+            iconName: 'swap', action: 'Desfazer', duration: 5000,
+            onAction: () => { replaceItem(wid, itemId, before); Router().refresh(); }
+          });
+        }
+      });
+    });
     body.querySelector('[data-remove]').addEventListener('click', () => { sheet.close('removed'); removeItem(wid, itemId); });
   }
 
@@ -340,6 +374,7 @@
     const prev = Router().current();
     const path = ['workouts'].concat(params).join('/');
     if (!prev || prev.path !== path) organizing = { list: false, detail: false };
+    if (params[0] === 'programs') return global.Programs.render(root, params[1]);
     if (params[0]) return renderDetail(root, params[0]);
     return renderList(root);
   }
@@ -491,16 +526,7 @@
     if (org) UI.sortable(listEl, { onReorder: (from, to) => { moveItem(id, from, to); Router().refresh(); } });
   }
 
-  function navbarHTML(title, actions = '') {
-    return `
-      <nav class="navbar">
-        <button type="button" class="nav-back" data-back aria-label="Voltar para Treinos">
-          ${icon('chevronLeft', { size: 24, stroke: 2 })}<span>Treinos</span>
-        </button>
-        <span class="navbar-title">${esc(title)}</span>
-        <div class="navbar-actions">${actions}</div>
-      </nav>`;
-  }
+  const navbarHTML = (title, actions = '') => UI.navbarHTML(title, 'Treinos', actions);
 
   function openMenu(id) {
     const w = get(id);
@@ -517,7 +543,7 @@
 
   global.Workouts = {
     COLORS, all, get, next, muscleSummary, exerciseCount, totalSets, scheme,
-    create, update, duplicate, remove, moveWorkout, addExercises, updateItem, removeItem, moveItem,
+    create, update, duplicate, remove, moveWorkout, addExercises, updateItem, removeItem, moveItem, replaceItem, replaceExercise,
     openCreate, openForm, openAddExercises, openItem, renderScreen
   };
 })(window);

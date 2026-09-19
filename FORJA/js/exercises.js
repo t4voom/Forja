@@ -10,63 +10,109 @@
   const MUSCLES = ['Peito', 'Costas', 'Ombros', 'Bíceps', 'Tríceps', 'Quadríceps', 'Posterior', 'Glúteos', 'Panturrilha', 'Abdômen'];
   const EQUIPMENT = ['Barra', 'Halteres', 'Máquina', 'Cabo', 'Smith', 'Peso corporal', 'Kettlebell', 'Outro'];
 
-  /* ---------- Biblioteca base ---------- */
+  /* ---------- Biblioteca base ----------
+     [nome, equipamento, padrão de movimento]. O id vem do nome e nunca muda (o histórico depende dele).
+     O padrão de movimento é o que permite sugerir substitutos: mesmo movimento > movimento parecido > mesmo músculo. */
   const BASE = {
     'Peito': [
-      ['Supino reto', 'Barra'], ['Supino inclinado', 'Barra'], ['Supino declinado', 'Barra'],
-      ['Supino reto com halteres', 'Halteres'], ['Supino inclinado com halteres', 'Halteres'], ['Supino na máquina', 'Máquina'],
-      ['Crucifixo com halteres', 'Halteres'], ['Crucifixo inclinado', 'Halteres'], ['Crossover', 'Cabo'],
-      ['Peck deck', 'Máquina'], ['Flexão de braço', 'Peso corporal']
+      ['Supino reto', 'Barra', 'press-horizontal'], ['Supino inclinado', 'Barra', 'press-inclinado'], ['Supino declinado', 'Barra', 'press-declinado'],
+      ['Supino reto com halteres', 'Halteres', 'press-horizontal'], ['Supino inclinado com halteres', 'Halteres', 'press-inclinado'],
+      ['Supino na máquina', 'Máquina', 'press-horizontal'], ['Supino inclinado na máquina', 'Máquina', 'press-inclinado'],
+      ['Supino inclinado no Smith', 'Smith', 'press-inclinado'],
+      ['Crucifixo com halteres', 'Halteres', 'fly'], ['Crucifixo inclinado', 'Halteres', 'fly-inclinado'], ['Crossover', 'Cabo', 'fly'],
+      ['Crossover polia baixa', 'Cabo', 'fly-inclinado'], ['Peck deck', 'Máquina', 'fly'], ['Flexão de braço', 'Peso corporal', 'press-horizontal']
     ],
     'Costas': [
-      ['Barra fixa', 'Peso corporal'], ['Puxada frontal', 'Cabo'], ['Puxada supinada', 'Cabo'], ['Puxada com triângulo', 'Cabo'],
-      ['Remada curvada', 'Barra'], ['Remada unilateral', 'Halteres'], ['Remada baixa', 'Cabo'], ['Remada cavalinho', 'Barra'],
-      ['Remada na máquina', 'Máquina'], ['Pulldown com braços estendidos', 'Cabo'], ['Levantamento terra', 'Barra'],
-      ['Hiperextensão lombar', 'Peso corporal']
+      ['Barra fixa', 'Peso corporal', 'pulldown'], ['Puxada frontal', 'Cabo', 'pulldown'], ['Puxada supinada', 'Cabo', 'pulldown'],
+      ['Puxada com triângulo', 'Cabo', 'pulldown'], ['Puxada na máquina', 'Máquina', 'pulldown'],
+      ['Remada curvada', 'Barra', 'row'], ['Remada unilateral', 'Halteres', 'row'], ['Remada baixa', 'Cabo', 'row'], ['Remada cavalinho', 'Barra', 'row'],
+      ['Remada na máquina', 'Máquina', 'row'], ['Pulldown com braços estendidos', 'Cabo', 'pullover'], ['Levantamento terra', 'Barra', 'hinge'],
+      ['Hiperextensão lombar', 'Peso corporal', 'back-extension']
     ],
     'Ombros': [
-      ['Desenvolvimento com barra', 'Barra'], ['Desenvolvimento com halteres', 'Halteres'], ['Desenvolvimento na máquina', 'Máquina'],
-      ['Desenvolvimento Arnold', 'Halteres'], ['Elevação lateral', 'Halteres'], ['Elevação lateral no cabo', 'Cabo'],
-      ['Elevação frontal', 'Halteres'], ['Crucifixo inverso', 'Halteres'], ['Face pull', 'Cabo'], ['Encolhimento', 'Halteres'],
-      ['Remada alta', 'Barra']
+      ['Desenvolvimento com barra', 'Barra', 'press-vertical'], ['Desenvolvimento com halteres', 'Halteres', 'press-vertical'],
+      ['Desenvolvimento na máquina', 'Máquina', 'press-vertical'], ['Desenvolvimento Arnold', 'Halteres', 'press-vertical'],
+      ['Elevação lateral', 'Halteres', 'lateral-raise'], ['Elevação lateral no cabo', 'Cabo', 'lateral-raise'],
+      ['Elevação lateral na máquina', 'Máquina', 'lateral-raise'], ['Elevação frontal', 'Halteres', 'front-raise'],
+      ['Crucifixo inverso', 'Halteres', 'rear-delt'], ['Face pull', 'Cabo', 'rear-delt'], ['Encolhimento', 'Halteres', 'shrug'],
+      ['Remada alta', 'Barra', 'upright-row']
     ],
     'Bíceps': [
-      ['Rosca direta', 'Barra'], ['Rosca direta com barra W', 'Barra'], ['Rosca alternada', 'Halteres'], ['Rosca martelo', 'Halteres'],
-      ['Rosca concentrada', 'Halteres'], ['Rosca Scott', 'Barra'], ['Rosca no cabo', 'Cabo'], ['Rosca inclinada', 'Halteres']
+      ['Rosca direta', 'Barra', 'curl'], ['Rosca direta com barra W', 'Barra', 'curl'], ['Rosca alternada', 'Halteres', 'curl'],
+      ['Rosca martelo', 'Halteres', 'curl'], ['Rosca concentrada', 'Halteres', 'curl'], ['Rosca Scott', 'Barra', 'curl'],
+      ['Rosca no cabo', 'Cabo', 'curl'], ['Rosca inclinada', 'Halteres', 'curl']
     ],
     'Tríceps': [
-      ['Tríceps pulley', 'Cabo'], ['Tríceps corda', 'Cabo'], ['Tríceps testa', 'Barra'], ['Tríceps francês', 'Halteres'],
-      ['Tríceps coice', 'Halteres'], ['Mergulho nas paralelas', 'Peso corporal'], ['Supino fechado', 'Barra'], ['Tríceps no banco', 'Peso corporal']
+      ['Tríceps pulley', 'Cabo', 'pushdown'], ['Tríceps corda', 'Cabo', 'pushdown'], ['Tríceps testa', 'Barra', 'overhead-ext'],
+      ['Tríceps francês', 'Halteres', 'overhead-ext'], ['Tríceps coice', 'Halteres', 'kickback'], ['Mergulho nas paralelas', 'Peso corporal', 'dip'],
+      ['Supino fechado', 'Barra', 'close-press'], ['Tríceps no banco', 'Peso corporal', 'dip']
     ],
     'Quadríceps': [
-      ['Agachamento livre', 'Barra'], ['Agachamento frontal', 'Barra'], ['Agachamento no Smith', 'Smith'], ['Agachamento goblet', 'Halteres'],
-      ['Agachamento búlgaro', 'Halteres'], ['Leg press 45°', 'Máquina'], ['Hack squat', 'Máquina'], ['Cadeira extensora', 'Máquina'],
-      ['Afundo', 'Halteres'], ['Passada', 'Halteres']
+      ['Agachamento livre', 'Barra', 'squat'], ['Agachamento frontal', 'Barra', 'squat'], ['Agachamento no Smith', 'Smith', 'squat'],
+      ['Agachamento goblet', 'Halteres', 'squat'], ['Agachamento búlgaro', 'Halteres', 'lunge'], ['Leg press 45°', 'Máquina', 'leg-press'],
+      ['Hack squat', 'Máquina', 'squat'], ['Cadeira extensora', 'Máquina', 'leg-extension'], ['Afundo', 'Halteres', 'lunge'], ['Passada', 'Halteres', 'lunge']
     ],
     'Posterior': [
-      ['Stiff', 'Barra'], ['Stiff com halteres', 'Halteres'], ['Levantamento terra romeno', 'Barra'], ['Mesa flexora', 'Máquina'],
-      ['Cadeira flexora', 'Máquina'], ['Flexora em pé', 'Máquina'], ['Good morning', 'Barra']
+      ['Stiff', 'Barra', 'hinge'], ['Stiff com halteres', 'Halteres', 'hinge'], ['Levantamento terra romeno', 'Barra', 'hinge'],
+      ['Mesa flexora', 'Máquina', 'leg-curl'], ['Cadeira flexora', 'Máquina', 'leg-curl'], ['Flexora em pé', 'Máquina', 'leg-curl'],
+      ['Good morning', 'Barra', 'hinge']
     ],
     'Glúteos': [
-      ['Elevação pélvica', 'Barra'], ['Ponte de glúteo', 'Peso corporal'], ['Abdução de quadril na máquina', 'Máquina'],
-      ['Glúteo no cabo', 'Cabo'], ['Glúteo na máquina', 'Máquina'], ['Step-up', 'Halteres'], ['Agachamento sumô', 'Halteres']
+      ['Elevação pélvica', 'Barra', 'hip-thrust'], ['Ponte de glúteo', 'Peso corporal', 'hip-thrust'],
+      ['Abdução de quadril na máquina', 'Máquina', 'abduction'], ['Glúteo no cabo', 'Cabo', 'glute-kickback'],
+      ['Glúteo na máquina', 'Máquina', 'glute-kickback'], ['Step-up', 'Halteres', 'lunge'], ['Agachamento sumô', 'Halteres', 'squat']
     ],
     'Panturrilha': [
-      ['Panturrilha em pé', 'Máquina'], ['Panturrilha sentado', 'Máquina'], ['Panturrilha no leg press', 'Máquina'],
-      ['Panturrilha unilateral', 'Halteres'], ['Panturrilha no Smith', 'Smith']
+      ['Panturrilha em pé', 'Máquina', 'calf'], ['Panturrilha sentado', 'Máquina', 'calf'], ['Panturrilha no leg press', 'Máquina', 'calf'],
+      ['Panturrilha unilateral', 'Halteres', 'calf'], ['Panturrilha no Smith', 'Smith', 'calf']
     ],
     'Abdômen': [
-      ['Abdominal crunch', 'Peso corporal'], ['Abdominal infra', 'Peso corporal'], ['Elevação de pernas', 'Peso corporal'],
-      ['Abdominal na polia', 'Cabo'], ['Abdominal na máquina', 'Máquina'], ['Abdominal oblíquo', 'Peso corporal'], ['Roda abdominal', 'Outro']
+      ['Abdominal crunch', 'Peso corporal', 'crunch'], ['Abdominal infra', 'Peso corporal', 'leg-raise'],
+      ['Elevação de pernas', 'Peso corporal', 'leg-raise'], ['Abdominal na polia', 'Cabo', 'crunch'], ['Abdominal na máquina', 'Máquina', 'crunch'],
+      ['Abdominal oblíquo', 'Peso corporal', 'oblique'], ['Roda abdominal', 'Outro', 'anti-extension']
     ]
+  };
+
+  // Movimentos que trabalham parecido (segunda opção quando não há o mesmo movimento livre)
+  const RELATED = {
+    'press-inclinado': ['fly-inclinado', 'press-horizontal'],
+    'press-horizontal': ['press-inclinado', 'press-declinado', 'fly'],
+    'press-declinado': ['press-horizontal', 'fly'],
+    'fly': ['fly-inclinado', 'press-horizontal'],
+    'fly-inclinado': ['press-inclinado', 'fly'],
+    'pulldown': ['pullover', 'row'],
+    'pullover': ['pulldown'],
+    'row': ['pulldown', 'rear-delt'],
+    'press-vertical': ['lateral-raise', 'front-raise'],
+    'lateral-raise': ['upright-row', 'press-vertical'],
+    'upright-row': ['lateral-raise', 'shrug'],
+    'rear-delt': ['row'],
+    'pushdown': ['overhead-ext', 'kickback'],
+    'overhead-ext': ['pushdown', 'kickback'],
+    'kickback': ['pushdown', 'overhead-ext'],
+    'dip': ['close-press', 'pushdown'],
+    'close-press': ['dip', 'pushdown'],
+    'squat': ['leg-press', 'lunge'],
+    'leg-press': ['squat', 'lunge'],
+    'lunge': ['squat', 'leg-press'],
+    'leg-extension': ['leg-press', 'squat'],
+    'hinge': ['leg-curl', 'hip-thrust'],
+    'leg-curl': ['hinge'],
+    'hip-thrust': ['glute-kickback', 'hinge'],
+    'glute-kickback': ['hip-thrust', 'abduction'],
+    'abduction': ['glute-kickback'],
+    'crunch': ['leg-raise'],
+    'leg-raise': ['crunch'],
+    'oblique': ['crunch'],
+    'anti-extension': ['crunch', 'leg-raise']
   };
 
   const slug = (s) => U.normalize(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
   // A ordem de BASE é curada: os movimentos mais comuns de cada grupo vêm primeiro
   const LIBRARY = [];
-  MUSCLES.forEach((muscle) => (BASE[muscle] || []).forEach(([name, equipment]) => {
-    LIBRARY.push(Object.freeze({ id: slug(name), name, muscle, equipment, custom: false, rank: LIBRARY.length }));
+  MUSCLES.forEach((muscle) => (BASE[muscle] || []).forEach(([name, equipment, pattern]) => {
+    LIBRARY.push(Object.freeze({ id: slug(name), name, muscle, equipment, pattern, custom: false, rank: LIBRARY.length }));
   }));
   const LIBRARY_BY_ID = new Map(LIBRARY.map((e) => [e.id, e]));
 
@@ -136,6 +182,71 @@
       .filter(Boolean)
       .sort((a, b) => b.score - a.score || byRank(a.e, b.e))
       .map((x) => x.e);
+  }
+
+  /* ---------- Substituição inteligente ----------
+     Mesmo movimento (ex.: outro supino inclinado) > movimento parecido (ex.: crucifixo inclinado) > mesmo músculo.
+     Entre iguais, vem primeiro o que você já fez (tem carga de referência). */
+  const REASON = { 3: 'Mesmo movimento', 2: 'Movimento parecido', 1: 'Mesmo músculo' };
+
+  function alternatives(exerciseId, { limit = 8 } = {}) {
+    const base = get(exerciseId);
+    if (!base) return [];
+    const related = RELATED[base.pattern] || [];
+    const hasHistory = (id) => !!(global.Sessions && global.Sessions.lastPerformance(id));
+    return all()
+      .filter((e) => e.id !== exerciseId)
+      .map((e) => {
+        let score = 0;
+        if (base.pattern && e.pattern === base.pattern) score = 3;
+        else if (base.pattern && related.includes(e.pattern)) score = 2;
+        else if (e.muscle === base.muscle) score = 1;
+        return { e, score, history: hasHistory(e.id) };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || (b.history - a.history) || byRank(a.e, b.e))
+      .slice(0, limit)
+      .map((x) => Object.assign({}, x.e, { reason: REASON[x.score], score: x.score }));
+  }
+
+  // Última carga de um exercício, para mostrar ao lado de cada opção
+  function lastText(id) {
+    const lp = global.Sessions && global.Sessions.lastPerformance(id);
+    if (!lp) return 'Sem histórico ainda';
+    const top = lp.sets.reduce((b, x) => ((x.weightKg || 0) * 1000 + x.reps > (b.weightKg || 0) * 1000 + b.reps ? x : b));
+    return `Último: ${U.fmtWeight(top.weightKg, { dec: 2 })} × ${top.reps} · ${U.fmtDayMonth(lp.date)}`;
+  }
+
+  function openSubstitute({ exerciseId, title = 'Trocar exercício', subtitle = '', inUse = [], note = '', onPick }) {
+    const base = get(exerciseId);
+    const list = alternatives(exerciseId);
+    const body = U.h(`
+      <div>
+        ${note ? `<p class="t-callout mb-5">${esc(note)}</p>` : ''}
+        ${list.length ? `
+          <div class="group">
+            ${list.map((e) => `
+              <button type="button" class="row sub-row" data-id="${esc(e.id)}">
+                <span class="row-main">
+                  <span class="row-title block truncate">${esc(e.name)}${inUse.includes(e.id) ? ' <span class="tag">no treino</span>' : ''}</span>
+                  <span class="row-sub block">${esc([e.equipment, e.reason].filter(Boolean).join(' · '))}</span>
+                  <span class="row-sub block sub-last num">${esc(lastText(e.id))}</span>
+                </span>
+                ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+              </button>`).join('')}
+          </div>` : '<p class="t-callout">Nenhuma alternativa na biblioteca para este exercício.</p>'}
+        <button type="button" class="btn btn-secondary btn-block mt-4" data-search>${icon('search', { size: 18, stroke: 1.9 })} Buscar outro exercício</button>
+      </div>`);
+    const sheet = UI.openSheet({ title, subtitle: subtitle || (base ? `No lugar de ${base.name}` : ''), body, tall: list.length > 4 });
+    body.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-id]');
+      if (row) { sheet.close('pick'); onPick(row.dataset.id); return; }
+      if (e.target.closest('[data-search]')) {
+        sheet.close();
+        openPicker({ title: 'Escolher substituto', inWorkout: inUse, onConfirm: (ids) => onPick(ids[0]) });
+      }
+    });
+    return sheet;
   }
 
   /* ---------- Personalizados: criar, editar, excluir ---------- */
@@ -276,6 +387,51 @@
   }
 
   /* ---------- Detalhe ---------- */
+
+  // Estatísticas do exercício, calculadas do histórico
+  function historyHTML(id) {
+    const S = global.Statistics;
+    const st = S.exerciseStats(global.Sessions.all(), id);
+    if (!st) {
+      return `
+        <p class="t-eyebrow mt-8">Histórico</p>
+        <p class="t-callout mt-2">Cargas, recordes e 1RM estimado deste exercício aparecem aqui depois do primeiro treino.</p>`;
+    }
+    const kg = (v, dec = 2) => U.fmtWeight(v, { dec });
+    const setText = (s) => `${U.fmtWeight(s.weightKg, { dec: 2, withUnit: false })} × ${s.reps}`;
+    const stat = (label, value, sub = '') => `
+      <div class="ex-stat">
+        <span class="stat-label">${label}</span>
+        <span class="ex-stat-value num">${value}</span>
+        ${sub ? `<span class="t-footnote">${sub}</span>` : ''}
+      </div>`;
+    return `
+      <p class="t-eyebrow mt-8">Seus números</p>
+      <div class="ex-stats mt-4">
+        ${stat('Melhor carga', kg(st.heaviest.weightKg), `${st.heaviest.reps} reps · ${U.fmtDayMonth(st.heaviest.date)}`)}
+        ${stat('Melhor série', setText(st.bestSet), U.fmtVolume(S.calculateVolume(st.bestSet.weightKg, st.bestSet.reps)))}
+        ${stat('Maior volume', U.fmtVolume(st.maxVolume.volume), U.fmtDayMonth(st.maxVolume.date))}
+        ${stat('1RM estimado', st.best1RM ? kg(U.round(st.best1RM.value, 1), 1) : '—', st.best1RM ? `a partir de ${setText(st.best1RM.set)}` : 'só com séries de até 12 reps')}
+        ${stat('Sessões', U.fmtNum(st.sessions), `última em ${U.fmtDayMonth(st.last.date)}`)}
+      </div>
+      <p class="t-footnote mt-3">O 1RM é uma estimativa (fórmula de Epley). Não é preciso testar sua carga máxima.</p>
+
+      <p class="t-eyebrow mt-8">Últimas sessões</p>
+      <div class="group mt-3">
+        ${st.entries.slice(0, 5).map((e) => {
+          const top = e.sets.reduce((b, x) => ((x.weightKg || 0) * 1000 + x.reps > (b.weightKg || 0) * 1000 + b.reps ? x : b));
+          return `
+            <button type="button" class="row" data-session="${esc(e.sessionId)}">
+              <span class="row-main">
+                <span class="row-title block num">${setText(top)} ${U.currentUnit()}</span>
+                <span class="row-sub block">${U.fmtDayMonth(e.date)} · ${U.plural(e.sets.length, 'série', 'séries')}</span>
+              </span>
+              <span class="row-value num">${U.fmtVolume(e.volume)}</span>
+              ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+            </button>`;
+        }).join('')}
+      </div>`;
+  }
   function openDetail(id) {
     const ex = get(id);
     if (!ex) return;
@@ -294,8 +450,23 @@
         <p class="t-eyebrow mt-8">Nos seus treinos</p>
         <p class="t-callout mt-2">${used.length ? used.map((w) => esc(w.name)).join(' · ') : 'Ainda não está em nenhum treino.'}</p>
 
-        <p class="t-eyebrow mt-8">Histórico</p>
-        <p class="t-callout mt-2">Cargas, recordes e 1RM estimado deste exercício aparecem aqui depois do primeiro treino.</p>
+        ${historyHTML(id)}
+
+        ${(() => {
+          const alts = alternatives(id, { limit: 4 });
+          return alts.length ? `
+            <p class="t-eyebrow mt-8">Alternativas</p>
+            <div class="group mt-3">
+              ${alts.map((a) => `
+                <button type="button" class="row" data-alt="${esc(a.id)}">
+                  <span class="row-main">
+                    <span class="row-title block truncate">${esc(a.name)}</span>
+                    <span class="row-sub block">${esc(a.equipment)} · ${a.reason}</span>
+                  </span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>`).join('')}
+            </div>` : '';
+        })()}
 
         ${ex.custom ? `
           <div class="group mt-8 has-icons">
@@ -313,6 +484,15 @@
       favBtn.setAttribute('aria-pressed', String(on));
       favBtn.innerHTML = favLabel(on);
       refreshScreen();
+    });
+
+    body.addEventListener('click', (e) => {
+      const alt = e.target.closest('[data-alt]');
+      if (alt) { sheet.close(); setTimeout(() => openDetail(alt.dataset.alt), 220); return; }
+      const row = e.target.closest('[data-session]');
+      if (!row) return;
+      sheet.close();
+      global.App.Router.go(`progress/session/${row.dataset.session}`);
     });
 
     body.querySelector('[data-add]').addEventListener('click', () => {
@@ -555,7 +735,7 @@
 
   global.Exercises = {
     MUSCLES, EQUIPMENT, LIBRARY,
-    all, get, resolve, search, isFavorite, toggleFavorite, usage,
+    all, get, resolve, search, isFavorite, toggleFavorite, usage, alternatives, openSubstitute,
     createCustom, updateCustom, removeCustom, validate,
     openForm, openDetail, openPicker, renderScreen
   };
