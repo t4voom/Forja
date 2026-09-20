@@ -138,6 +138,17 @@
     };
   }
 
+  // Semana de recuperação do programa: ~70% da carga da última vez, longe da falha
+  function deloadAdvice(exerciseId, equipment) {
+    const perf = recentPerformances(exerciseId, 1)[0];
+    if (!perf) return { kind: 'deload', title: 'Semana de recuperação', text: 'Use cargas leves e foque na técnica. Termine cada série bem longe da falha.', from: 0, to: 0 };
+    const top = Math.max(...perf.sets.map((s) => s.weightKg || 0));
+    if (top <= 0) return { kind: 'deload', title: 'Semana de recuperação', text: 'Faça cerca de metade das repetições de costume, sem chegar perto da falha.', from: 0, to: 0 };
+    const step = loadStep(equipment, top);
+    const to = Math.max(step, Math.floor((top * 0.7) / step) * step);
+    return { kind: 'deload', title: 'Semana de recuperação', text: `Use cerca de 70% da carga: ${U.fmtWeight(to, { dec: 2 })} em vez de ${U.fmtWeight(top, { dec: 2 })}. Foque na técnica e termine longe da falha.`, from: top, to };
+  }
+
   /* ==========================================================================
      Treino em andamento (cada mudança é persistida na hora)
      ========================================================================== */
@@ -174,6 +185,9 @@
       startedAt: now(), updatedAt: now(), cursor: 0,
       exercises: w.exercises.map(entryFor)
     };
+    // Semana do programa (a de recuperação muda o conselho do Coach)
+    const phase = global.Programs && global.Programs.phaseForWorkout(w.id);
+    if (phase) a.phase = phase.key;
     Store.set('active', a);
     return a;
   }
@@ -453,7 +467,9 @@
     const exDone = ex.sets.length > 0 && cur === -1;
     const isLast = i === a.exercises.length - 1;
     const lp = lastPerformance(ex.exerciseId);
-    const coach = !ex.sets.some((s) => s.done) ? coachAdvice(ex.exerciseId, ex.target, ex.equipment) : null;
+    const coach = ex.sets.some((s) => s.done) ? null
+      : a.phase === 'deload' ? deloadAdvice(ex.exerciseId, ex.equipment)
+      : coachAdvice(ex.exerciseId, ex.target, ex.equipment);
     const topNow = exDone && reachedTop(ex.sets, ex.target);
     const nextEx = a.exercises[i + 1];
 
@@ -487,7 +503,13 @@
           </div>
           ${ex.swappedFrom ? `<p class="t-footnote mt-1">No lugar de ${esc((global.Exercises.get(ex.swappedFrom) || {}).name || 'outro exercício')}</p>` : ''}
 
-          ${coach ? `
+          ${coach && !global.Plans.isPremium() ? `
+            <button type="button" class="coach coach-locked" data-paywall="coach">
+              <p class="coach-head">${icon('sparkle', { size: 15, stroke: 1.8 })} Coach <span class="premium-pill">${icon('lock', { size: 11, stroke: 2.4 })} Premium</span></p>
+              <p class="coach-title">Tenho uma sugestão de carga para hoje</p>
+              <p class="t-callout mt-1">O Coach analisou seu último treino neste exercício. Toque para ver com o Premium.</p>
+            </button>` : ''}
+          ${coach && global.Plans.isPremium() ? `
             <div class="coach coach-${coach.kind}">
               <p class="coach-head">${icon('sparkle', { size: 15, stroke: 1.8 })} Coach</p>
               <p class="coach-title">${esc(coach.title)}</p>
@@ -1065,7 +1087,7 @@
     const session = finishWorkout();
     if (!session) return;
     const fresh = global.Progress.achievements().filter((a) => a.unlocked && !unlockedBefore.has(a.id));
-    if (fresh.length) setTimeout(() => global.Progress.celebrate(fresh), 700);
+    if (fresh.length && global.Plans.isPremium()) setTimeout(() => global.Progress.celebrate(fresh), 700);
     U.haptic('finish');
     hide();
     global.App.Router.go('home');

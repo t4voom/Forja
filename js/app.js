@@ -94,12 +94,17 @@
     render(root) {
       const profile = Store.get('profile') || {};
       const name = U.firstName(profile.name);
+      global.Programs.sync();
       const workout = Workouts.next();
       const live = Sessions.active();
       const history = Sessions.all();
       const week = Statistics.calculateWeeklyStats(history);
       const streak = Statistics.streakInfo(history);
       const insights = Statistics.generateInsights(history, Store.get('bodyweight'));
+      // O alerta de equilíbrio mais importante entra primeiro nos insights
+      const balance = global.Plans.isPremium() ? global.Balance.topAlert(history) : null;
+      if (balance) insights.unshift({ icon: 'balance', text: balance.title, go: 'progress/balance' });
+      const today = global.Reminders.today(workout);
       const time = U.durationParts(week.durationSec);
       const now = new Date();
 
@@ -112,8 +117,21 @@
 
           <header class="home-hello" style="--i:1">
             <h1 class="t-large-title" data-large-title>${U.greeting(now)}${name ? `, ${esc(name)}` : ''}.</h1>
-            <p class="t-sub mt-2">${live ? 'Seu treino está em andamento.' : workout ? 'Seu treino está pronto.' : 'Vamos montar sua rotina.'}</p>
+            <p class="t-sub mt-2">${live ? 'Seu treino está em andamento.' : today.trainedToday ? 'Treino de hoje feito. Bom descanso.' : today.workoutDay && workout ? 'Hoje é dia de treino.' : workout ? 'Seu treino está pronto.' : 'Vamos montar sua rotina.'}</p>
           </header>
+
+          ${today.weightDue ? `
+            <div class="nudge mt-8" style="--i:2">
+              <span class="nudge-icon">${icon('scale', { size: 20, stroke: 1.7 })}</span>
+              <span class="min-w-0 flex-1">
+                <span class="row-title block">Dia de se pesar</span>
+                <span class="row-sub block">${today.lastWeight ? `Último: ${esc(today.lastWeight)}` : 'Registre para acompanhar a evolução.'}</span>
+              </span>
+              <span class="nudge-actions">
+                <button type="button" class="btn btn-secondary btn-sm" data-action="weight">Registrar</button>
+                <button type="button" class="icon-btn is-plain" data-action="snooze-weight" aria-label="Agora não">${icon('close', { size: 16, stroke: 2 })}</button>
+              </span>
+            </div>` : ''}
 
           <div class="mt-12" style="--i:2">
             <p class="t-eyebrow mb-4">${live ? 'Treino de hoje' : workout ? 'Seu próximo treino' : 'Comece por aqui'}</p>
@@ -147,11 +165,16 @@
                 </button>` : ''}
               ${insights.length ? `
                 <ul class="insights ${streak.days ? 'mt-5' : ''}">
-                  ${insights.slice(0, 3).map((i) => `<li class="insight"><span class="insight-icon">${icon(i.icon, { size: 18, stroke: 1.8 })}</span><span>${esc(i.text)}</span></li>`).join('')}
+                  ${insights.slice(0, 3).map((i) => i.go
+                    ? `<li><button type="button" class="insight is-link" data-go="${esc(i.go)}"><span class="insight-icon">${icon(i.icon, { size: 18, stroke: 1.8 })}</span><span class="flex-1 text-left">${esc(i.text)}</span>${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}</button></li>`
+                    : `<li class="insight"><span class="insight-icon">${icon(i.icon, { size: 18, stroke: 1.8 })}</span><span>${esc(i.text)}</span></li>`).join('')}
                 </ul>` : ''}
             </div>` : ''}
         </section>`;
       root.querySelectorAll('[data-action="progress"]').forEach((b) => b.addEventListener('click', () => Router.go('progress')));
+      root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => Router.go(b.dataset.go)));
+      root.querySelector('[data-action="weight"]')?.addEventListener('click', () => global.Progress.openWeightSheet());
+      root.querySelector('[data-action="snooze-weight"]')?.addEventListener('click', () => { global.Reminders.snoozeWeight(); Router.refresh(); });
 
       root.querySelectorAll('[data-action="create"]').forEach((b) => b.addEventListener('click', () => Workouts.openCreate()));
       root.querySelectorAll('[data-action="open"]').forEach((b) => b.addEventListener('click', () => Router.go(`workouts/${b.dataset.id}`)));
@@ -183,6 +206,7 @@
       return `
         <article class="hero" style="--tint:${esc(w.color || 'var(--accent)')}">
           <button type="button" class="hero-open" data-action="open" data-id="${esc(w.id)}" aria-label="Ver ${esc(w.name)}">
+            ${global.Programs.badgeFor(w.id) ? `<span class="badge">${esc(global.Programs.badgeFor(w.id))}</span>` : ''}
             <span class="hero-name block">${esc(w.name)}</span>
             <span class="hero-meta block">${esc(Workouts.muscleSummary(w) || 'Sem exercícios ainda')}</span>
             <span class="t-callout block mt-1">${Workouts.exerciseCount(w)}</span>
@@ -199,13 +223,16 @@
         <article class="hero">
           <div class="hero-icon">${icon('dumbbell', { size: 26 })}</div>
           <h2 class="hero-name">Seu primeiro<br>treino.</h2>
-          <p class="t-sub mt-4">Monte sua rotina uma vez. Depois é só abrir, treinar e registrar cada série.</p>
+          <p class="t-sub mt-4">Escolha um programa pronto, com progressão de 8 semanas, ou monte sua rotina do zero.</p>
           <div class="hero-foot">
-            <button class="btn btn-primary" data-action="create">Criar treino ${icon('arrowRight', { size: 18, stroke: 2 })}</button>
+            <button class="btn btn-ghost is-muted" data-action="create">Criar do zero</button>
+            <button class="btn btn-primary" data-go="workouts/programs">Ver programas ${icon('arrowRight', { size: 18, stroke: 2 })}</button>
           </div>
         </article>`;
     }
   };
+
+  const syncText = (st) => ({ idle: 'Tudo sincronizado com a sua conta.', pending: 'Alterações aguardando envio…', syncing: 'Sincronizando…', offline: 'Sem conexão. As alterações sobem quando a internet voltar.' }[st] || '');
 
   /* ==========================================================================
      Perfil e configurações
@@ -271,6 +298,55 @@
               </div>
             </div>
 
+            <div class="section" style="--i:1">
+              <p class="t-eyebrow group-label">Conta</p>
+              <div class="group has-icons">
+                <button class="row" data-go="profile/plan">
+                  <span class="row-icon">${icon('crown', { size: 20 })}</span>
+                  <span class="row-main row-title">Plano</span>
+                  <span class="row-value">${global.Plans.isPremium() ? '<span class="t-accent">Premium</span>' : 'Free'}</span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>
+                <div class="row">
+                  <span class="row-icon">${icon('user', { size: 20 })}</span>
+                  <span class="row-main row-title">E-mail</span>
+                  <span class="row-value truncate profile-email">${esc((global.Backend.user() || {}).email || '')}</span>
+                </div>
+                <button class="row" data-action="logout">
+                  <span class="row-icon">${icon('logout', { size: 20 })}</span>
+                  <span class="row-main row-title">Sair da conta</span>
+                </button>
+              </div>
+              ${global.Sync.enabled() ? `<p class="t-footnote group-note" data-sync-state>${syncText(global.Sync.state())}</p>` : ''}
+              ${global.Plans.isPremium() ? '' : `
+                <button type="button" class="upsell pressable mt-4" data-go="profile/plan">
+                  <span class="upsell-icon">${icon('sparkle', { size: 20, stroke: 1.8 })}</span>
+                  <span class="min-w-0 text-left flex-1">
+                    <span class="row-title block">Seja Premium</span>
+                    <span class="row-sub block">Programas, Coach, equilíbrio muscular e mais por ${global.Plans.money(global.Plans.PRICE.monthly)}/mês.</span>
+                  </span>
+                  ${icon('chevronRight', { size: 18, stroke: 2, cls: 'row-chevron' })}
+                </button>`}
+            </div>
+
+            <div class="section" style="--i:3">
+              <p class="t-eyebrow group-label">Rotina</p>
+              <div class="group has-icons">
+                <button class="row" data-go="profile/reminders">
+                  <span class="row-icon">${icon('bell', { size: 20 })}</span>
+                  <span class="row-main row-title">Lembretes</span>
+                  <span class="row-value">${global.Plans.isPremium() ? esc(global.Reminders.summary()) : global.Plans.pill()}</span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>
+                <button class="row" data-go="${global.Programs.state() ? `workouts/programs/${global.Programs.state().id}` : 'workouts/programs'}">
+                  <span class="row-icon">${icon('layers', { size: 20 })}</span>
+                  <span class="row-main row-title">Programa</span>
+                  <span class="row-value">${!global.Plans.isPremium() ? global.Plans.pill() : global.Programs.state() ? esc(global.Programs.get(global.Programs.state().id).name) : '<span class="t-faint">Escolher</span>'}</span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>
+              </div>
+            </div>
+
             <div class="section" style="--i:3">
               <p class="t-eyebrow group-label">Preferências</p>
               <div class="group">
@@ -298,7 +374,7 @@
                   <span class="row-main row-title">Apagar todos os dados</span>
                 </button>
               </div>
-              <p class="t-footnote group-note">Tudo fica salvo apenas neste aparelho. Sem conta, sem nuvem.</p>
+              <p class="t-footnote group-note">${global.Backend.mode === 'sheets' ? 'Seus dados ficam na sua conta e também neste aparelho, para funcionar sem internet.' : 'Modo local: sua conta e seus dados ficam apenas neste aparelho.'}</p>
             </div>
 
             <p class="t-footnote text-center mt-14" style="--i:5"><span class="wordmark t-faint">FORJA</span></p>
@@ -329,7 +405,18 @@
       }, { label: 'Animações' }));
 
       root.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => Profile.edit(b.dataset.edit)));
+      root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => Router.go(b.dataset.go)));
       root.querySelector('[data-action="reset"]').addEventListener('click', Profile.confirmReset);
+      root.querySelector('[data-action="logout"]').addEventListener('click', () => global.Auth.confirmLogout());
+      const syncEl = root.querySelector('[data-sync-state]');
+      if (syncEl) { const off = global.Sync.onChange((st) => { if (!syncEl.isConnected) return off(); syncEl.textContent = syncText(st); }); }
+    },
+
+    // #/profile · #/profile/plan · #/profile/reminders
+    route(el, p) {
+      if (p[0] === 'plan') return global.Plans.render(el);
+      if (p[0] === 'reminders') return global.Plans.isPremium() ? global.Reminders.render(el) : global.Plans.renderLocked(el, 'reminders', 'Perfil');
+      return Profile.render(el);
     },
 
     save(patch) {
@@ -397,13 +484,17 @@
     confirmReset() {
       UI.confirmSheet({
         title: 'Apagar todos os dados?',
-        message: 'Treinos, histórico, recordes e perfil serão removidos deste aparelho. Essa ação não pode ser desfeita.',
+        message: global.Sync.enabled()
+          ? 'Treinos, histórico, recordes e perfil serão apagados da sua conta e deste aparelho. Essa ação não pode ser desfeita.'
+          : 'Treinos, histórico, recordes e perfil serão removidos deste aparelho. Essa ação não pode ser desfeita.',
         confirmLabel: 'Apagar tudo',
         destructive: true,
         onConfirm: () => {
-          Store.clearAll();
-          history.replaceState(null, '', location.pathname);
-          location.reload();
+          Promise.resolve(global.Sync.enabled() ? global.Backend.clearRemote() : null).catch(() => {}).finally(() => {
+            Store.clearAll();
+            history.replaceState(null, '', location.pathname);
+            location.reload();
+          });
         }
       });
     }
@@ -417,7 +508,7 @@
     { route: 'workouts', label: 'Treinos', icon: 'dumbbell', title: 'Treinos', render: (el, p) => Workouts.renderScreen(el, p) },
     { route: 'exercises', label: 'Exercícios', icon: 'list', title: 'Exercícios', render: (el) => global.Exercises.renderScreen(el) },
     { route: 'progress', label: 'Evolução', icon: 'chart', title: 'Evolução', render: (el, p) => global.Progress.renderScreen(el, p) },
-    { route: 'profile', label: 'Perfil', icon: 'user', title: 'Perfil', render: (el) => Profile.render(el) }
+    { route: 'profile', label: 'Perfil', icon: 'user', title: 'Perfil', render: (el, p) => Profile.route(el, p) }
   ];
 
   /* Rotas: #/aba ou #/aba/parâmetro (ex.: #/workouts/w_123).
@@ -667,10 +758,11 @@
         <div class="flex-1 flex flex-col justify-center">
           <div class="ob-check">${icon('check', { size: 40, stroke: 2.4 })}</div>
           <h1 class="t-title" style="font-size:44px;letter-spacing:-0.04em">Tudo pronto.</h1>
-          <p class="t-title-2 t-muted mt-4">Agora vamos criar<br>seu primeiro treino.</p>
+          <p class="t-title-2 t-muted mt-4">Escolha um programa pronto<br>ou monte o seu treino.</p>
         </div>
         <div class="ob-foot">
-          <button class="btn btn-primary btn-block" type="button" data-finish="create">Criar meu treino</button>
+          <button class="btn btn-primary btn-block" type="button" data-finish="programs">Ver programas prontos</button>
+          <button class="btn btn-secondary btn-block" type="button" data-finish="create">Montar do zero</button>
           <button class="btn btn-ghost is-muted btn-block" type="button" data-finish="later">Fazer depois</button>
         </div>`
     };
@@ -850,10 +942,12 @@
     if (started) return;
     started = true;
     if (choice === 'create') history.replaceState(null, '', '#/workouts');
+    if (choice === 'programs') history.replaceState(null, '', '#/workouts/programs');
     $('#app').hidden = false;
     $('#active-bar').addEventListener('click', () => Sessions.open());
     Router.start();
     Sessions.syncClock();
+    if (global.Plans.isPremium()) global.Reminders.start();
     if (choice === 'create') setTimeout(() => Workouts.openCreate(), 350);
     // Treino não finalizado (navegador fechado no meio): oferece continuar
     else if (Sessions.active()) setTimeout(() => Sessions.promptRecovery(), 450);
@@ -861,23 +955,34 @@
 
   function init() {
     Store.checkAvailable();
-    Store.migrate();
-    applyTheme();
 
     // Habilita :active em toques no iOS
     document.addEventListener('touchstart', () => {}, { passive: true });
-
-    Store.subscribe((evt) => {
-      if (evt.type === 'error') UI.toast('Não foi possível salvar neste aparelho.', { iconName: 'info', duration: 4000 });
-      if (evt.type === 'external' && started) { applyTheme(); Router.refresh(); }
-    });
 
     if (!Store.isAvailable()) {
       UI.toast('Armazenamento indisponível: seus dados não serão salvos.', { iconName: 'info', duration: 6000 });
     }
 
-    if (Store.get('meta').onboarded) startApp();
-    else Onboarding.start(startApp);
+    // Primeiro a conta; depois tudo lê e grava no espaço dela
+    global.Auth.start((user, info = {}) => {
+      Store.migrate();
+      applyTheme();
+      document.documentElement.classList.toggle('is-premium', global.Plans.isPremium());
+
+      Store.subscribe((evt) => {
+        if (evt.type === 'error') UI.toast('Não foi possível salvar neste aparelho.', { iconName: 'info', duration: 4000 });
+        if (evt.type === 'external' && started) { applyTheme(); Router.refresh(); }
+      });
+
+      global.Sync.start();
+      if (info.adopted) {
+        if (global.Sync.enabled()) global.Sync.pushAll();
+        setTimeout(() => UI.toast('Os treinos deste aparelho agora estão na sua conta.', { iconName: 'check', duration: 5000 }), 900);
+      }
+
+      if (Store.get('meta').onboarded) startApp();
+      else Onboarding.start(startApp);
+    });
   }
 
   global.App = { Router, Home, Profile, Validate, GOALS, EXPERIENCE, applyTheme, logBodyweight };

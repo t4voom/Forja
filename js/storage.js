@@ -1,4 +1,6 @@
 /* FORJA — persistência em localStorage
+   Cada conta tem seu próprio espaço: forja.u.<id da conta>.<chave> (ver useUser).
+   Chaves do aparelho, fora de qualquer conta: forja.session, forja.accounts (backend.js).
    Regras:
    · Cada coleção vive em sua própria chave (forja.<chave>), então salvar uma série
      não reescreve o histórico inteiro.
@@ -8,7 +10,9 @@
 (function (global) {
   'use strict';
 
-  const PREFIX = 'forja.';
+  const ROOT = 'forja.';
+  let PREFIX = ROOT;          // trocado por useUser() depois do login
+  let userId = null;
   const SCHEMA_VERSION = 1;
 
   const DEFAULTS = {
@@ -21,7 +25,14 @@
     sessions: [],           // treinos concluídos
     active: null,           // treino em andamento (autosave)
     bodyweight: [],         // { id, date, kg }
-    goals: []               // metas
+    goals: [],              // metas
+    program: null,          // programa pronto em andamento (ver programs.js)
+    reminders: {            // lembretes (ver reminders.js)
+      workout: { on: false, days: [1, 3, 5], time: '18:00' },
+      weight: { on: false, day: 1, time: '08:00' },
+      notify: false,
+      last: {}
+    }
   };
   const KEYS = Object.keys(DEFAULTS);
 
@@ -109,7 +120,7 @@
 
   // Outra aba alterou os dados: invalida o cache daquela chave
   global.addEventListener('storage', (e) => {
-    if (!e.key || !e.key.startsWith(PREFIX)) return;
+    if (!userId || !e.key || !e.key.startsWith(PREFIX)) return;
     const key = e.key.slice(PREFIX.length);
     if (KEYS.includes(key)) { delete cache[key]; emit({ type: 'external', key }); }
   });
@@ -137,9 +148,10 @@
     return data;
   }
 
+  // Apaga só os dados da conta atual (as outras contas do aparelho continuam)
   function clearAll() {
     try {
-      Object.keys(localStorage).filter((k) => k.startsWith(PREFIX)).forEach((k) => localStorage.removeItem(k));
+      Object.keys(localStorage).filter((k) => k.startsWith(PREFIX) && (userId || !k.startsWith(`${ROOT}u.`))).forEach((k) => localStorage.removeItem(k));
     } catch (e) {}
     KEYS.forEach((k) => delete cache[k]);
     emit({ type: 'clear' });
@@ -155,10 +167,47 @@
     return total;
   }
 
+  /* ---------- Contas ---------- */
+  // Passa a ler e gravar no espaço da conta. Chamado uma vez, logo depois do login.
+  function useUser(id) {
+    userId = id;
+    PREFIX = `${ROOT}u.${id}.`;
+    KEYS.forEach((k) => delete cache[k]);
+  }
+
+  const hasAny = (prefix) => KEYS.some((k) => { try { return localStorage.getItem(prefix + k) !== null; } catch (e) { return false; } });
+
+  // Dados de antes do login (forja.<chave>): se a conta ainda está vazia, eles passam a ser dela
+  function adoptLegacy() {
+    if (!userId || !hasAny(ROOT) || hasAny(PREFIX)) return false;
+    try {
+      KEYS.forEach((k) => {
+        const raw = localStorage.getItem(ROOT + k);
+        if (raw === null) return;
+        localStorage.setItem(PREFIX + k, raw);
+        localStorage.removeItem(ROOT + k);
+        delete cache[k];
+      });
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // Dados vindos do servidor (Google Planilhas) substituem os locais
+  function importAll(data) {
+    if (!data) return;
+    KEYS.forEach((k) => {
+      if (!(k in data)) return;
+      try { localStorage.setItem(PREFIX + k, JSON.stringify(data[k])); } catch (e) { emit({ type: 'error', key: k, error: e }); }
+      delete cache[k];
+    });
+    emit({ type: 'import' });
+  }
+
   global.Store = {
     SCHEMA_VERSION, KEYS, DEFAULTS,
     get, set, update, remove, subscribe,
     checkAvailable, isAvailable: () => available,
-    migrate, snapshot, clearAll, usageBytes
+    migrate, snapshot, clearAll, usageBytes,
+    useUser, adoptLegacy, importAll, hasData: () => hasAny(PREFIX), userId: () => userId
   };
 })(window);

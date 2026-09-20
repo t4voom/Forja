@@ -46,7 +46,9 @@
 
   // Rotação: o treino seguinte ao último realizado; sem histórico, o primeiro da lista
   function next() {
-    const list = all();
+    // Com um programa em andamento, a rotação segue só os treinos dele
+    const prog = global.Programs ? global.Programs.workoutIds() : [];
+    const list = prog.length ? all().filter((w) => prog.includes(w.id)) : all();
     if (!list.length) return null;
     const last = global.Sessions.all().find((s) => list.some((w) => w.id === s.workoutId));
     if (!last) return list[0];
@@ -148,7 +150,10 @@
   function updateItem(wid, itemId, patch) {
     update(wid, (w) => {
       const x = w.exercises.find((i) => i.id === itemId);
-      if (x) Object.assign(x, patch);
+      if (!x) return;
+      Object.assign(x, patch);
+      // Ajustado à mão: deixa de seguir a progressão do programa
+      if (x.base && ('sets' in patch || 'repMin' in patch || 'repMax' in patch)) x.manual = true;
     });
   }
 
@@ -261,6 +266,7 @@
 
   // Criar: salva, abre o treino e já oferece a escolha de exercícios
   function openCreate() {
+    if (!global.Plans.canCreateWorkout()) return global.Plans.openPaywall('workouts');
     openForm({
       onSaved: (w) => {
         Router().go(`workouts/${w.id}`);
@@ -300,7 +306,10 @@
           <div class="row"><span class="row-main"><span class="row-title block">Reps mínimas</span></span><span data-slot="repMin"></span></div>
           <div class="row"><span class="row-main"><span class="row-title block">Reps máximas</span></span><span data-slot="repMax"></span></div>
         </div>
-        <p class="t-footnote group-note">Quando você fizer o máximo em todas as séries, o FORJA sugere subir a carga.</p>
+        <p class="t-footnote group-note">${item.base && !item.manual
+          ? 'Este exercício segue a progressão semanal do programa. Se você mudar aqui, ele passa a usar os seus valores.'
+          : item.base ? 'Você ajustou este exercício: ele usa os seus valores, não os da progressão do programa.'
+          : 'Quando você fizer o máximo em todas as séries, o FORJA sugere subir a carga.'}</p>
 
         <div class="group mt-8 has-icons">
           <button type="button" class="row" data-view><span class="row-icon">${icon('info', { size: 20 })}</span><span class="row-main row-title">Ver exercício</span></button>
@@ -396,6 +405,8 @@
           </div>
         </header>
 
+        ${org ? '' : global.Programs.state() ? `<div class="mt-8">${global.Programs.statusCardHTML()}</div>` : ''}
+
         ${list.length ? `
           <div class="workout-list mt-8 ${org ? 'is-organizing' : 'reveal'}" data-list>
             ${list.map((w, i) => `
@@ -409,18 +420,22 @@
                 ${org ? moveButtons(i, list.length) : `<span class="workout-card-chevron">${icon('chevronRight', { size: 20, stroke: 2 })}</span>`}
               </article>`).join('')}
           </div>
-          ${org ? '<p class="t-footnote mt-5 text-center">Arraste pela alça ou use as setas.</p>' : ''}` : `
+          ${org ? '<p class="t-footnote mt-5 text-center">Arraste pela alça ou use as setas.</p>' : `
+            ${global.Plans.isPremium() ? '' : `<p class="t-footnote mt-5 mx-1">${Math.min(list.length, global.Plans.FREE_WORKOUTS)} de ${global.Plans.FREE_WORKOUTS} treinos do plano Free${list.length >= global.Plans.FREE_WORKOUTS ? ' · <button type="button" class="text-btn rm-inline" data-paywall="workouts">Liberar ilimitados</button>' : ''}</p>`}
+            <div class="mt-8">${global.Programs.promoCardHTML()}</div>`}` : `
           <div class="mt-8 reveal">
             <div class="empty">
               <div class="empty-icon">${icon('dumbbell', { size: 26 })}</div>
               <p class="empty-title">Ainda não há treinos</p>
-              <p class="empty-text">Crie seu primeiro treino e comece a acompanhar sua evolução.</p>
-              <button class="btn btn-primary" data-create>Criar treino</button>
+              <p class="empty-text">Comece com um programa pronto ou monte o seu do zero.</p>
+              <button class="btn btn-primary" data-go="workouts/programs">Ver programas prontos</button>
+              <button class="btn btn-ghost is-muted mt-2" data-create>Criar do zero</button>
             </div>
           </div>`}
       </section>`;
 
     root.querySelectorAll('[data-create]').forEach((b) => b.addEventListener('click', openCreate));
+    root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => Router().go(b.dataset.go)));
     const orgBtn = root.querySelector('[data-organize]');
     if (orgBtn) orgBtn.addEventListener('click', () => { organizing.list = !organizing.list; Router().refresh(); });
 
@@ -535,7 +550,10 @@
       title: w.name,
       actions: [
         { label: 'Editar nome, descrição e cor', icon: 'edit', onSelect: () => openForm({ workout: w, onSaved: () => { Router().refresh(); UI.toast('Salvo'); } }) },
-        { label: 'Duplicar treino', icon: 'copy', onSelect: () => { const c = duplicate(id); Router().go(`workouts/${c.id}`); UI.toast('Cópia criada'); } },
+        { label: 'Duplicar treino', icon: 'copy', onSelect: () => {
+          if (!global.Plans.canCreateWorkout()) return global.Plans.openPaywall('workouts');
+          const c = duplicate(id); Router().go(`workouts/${c.id}`); UI.toast('Cópia criada');
+        } },
         { label: 'Excluir treino', icon: 'trash', danger: true, onSelect: () => { Router().back('workouts'); remove(id); } }
       ]
     });

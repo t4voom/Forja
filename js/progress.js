@@ -1,6 +1,6 @@
 /* FORJA — evolução
    Tudo aqui é calculado a partir do histórico salvo — nada é digitado à mão nem inventado.
-   Rotas: #/progress · history · session/<id> · records · body · goals · achievements
+   Rotas: #/progress · history · session/<id> · records · body · goals · achievements · balance
    Gráficos: SVG feito à mão (sem bibliotecas). Uma série por gráfico → uma cor (--chart), sem legenda;
    linha 2px, área 10%, ponto final com anel; barras ≤ 24px com topo arredondado; grade em linha fina.
    Todo gráfico tem tooltip (toque/mouse/teclado) e uma tabela "Ver dados". */
@@ -38,12 +38,17 @@
 
   function renderScreen(root, params = []) {
     const [a, b] = params;
+    const P = global.Plans;
+    // Telas Premium: no Free mostram o que existe ali e o caminho para assinar
+    if (!P.isPremium() && ['records', 'goals', 'achievements'].includes(a)) return P.renderLocked(root, 'analytics', 'Evolução');
+    if (!P.isPremium() && a === 'balance') return P.renderLocked(root, 'balance', 'Evolução');
     if (a === 'history') return renderHistory(root);
     if (a === 'session' && b) return renderSession(root, b);
     if (a === 'records') return renderRecords(root);
     if (a === 'body') return renderBody(root);
     if (a === 'goals') return renderGoals(root);
     if (a === 'achievements') return renderAchievements(root);
+    if (a === 'balance') return global.Balance.render(root);
     return renderOverview(root);
   }
 
@@ -262,6 +267,7 @@
     const streak = Statistics.streakInfo(all);
     const insights = Statistics.generateInsights(all, bodyweight);
     const empty = all.length === 0;
+    const premium = global.Plans.isPremium();
 
     root.innerHTML = `
       <section class="page">
@@ -284,6 +290,8 @@
             <ul class="insights">${insights.slice(0, 5).map(insightHTML).join('')}</ul>
           </section>` : ''}
 
+        ${premium ? global.Balance.sectionHTML(all) : global.Plans.lockedHTML('balance')}
+
         <section class="section">
           <div class="filter-row" data-slot="period"></div>
 
@@ -300,10 +308,10 @@
 
         ${volumeSection(inPeriod, period)}
         ${frequencySection(inPeriod, period)}
-        ${loadSection(all, period)}
+        ${premium ? loadSection(all, period) : ''}
         ${bodySection(bodyweight, period)}
 
-        ${records.length ? `
+        ${premium && records.length ? `
           <section class="section">
             <div class="section-head">
               <p class="t-eyebrow">Recordes recentes</p>
@@ -324,10 +332,14 @@
 
         <div class="section-divider"></div>
 
-        ${consistencySection(all)}
-        ${calendarSection()}
-        ${goalsSection(all, bodyweight)}
-        ${achievementsSection(all)}
+        ${premium ? `
+          ${consistencySection(all)}
+          ${calendarSection()}
+          ${goalsSection(all, bodyweight)}
+          ${achievementsSection(all)}` : global.Plans.lockedHTML('analytics', {
+            title: 'Veja sua evolução completa',
+            text: 'Carga de cada exercício ao longo do tempo, recordes, calendário de consistência, metas e conquistas.'
+          })}
 
         <section class="section">
           <div class="group has-icons">
@@ -340,7 +352,7 @@
             <button type="button" class="row" data-go="progress/records">
               <span class="row-icon">${icon('trophy', { size: 20 })}</span>
               <span class="row-main row-title">Recordes por exercício</span>
-              <span class="row-value">${U.fmtNum(allRecords.length)}</span>
+              <span class="row-value">${premium ? U.fmtNum(allRecords.length) : global.Plans.pill()}</span>
               ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
             </button>
           </div>
@@ -349,12 +361,13 @@
 
     if (empty) {
       // Mesmo sem treinos, peso corporal e metas já podem ser usados
-      root.querySelector('.page').insertAdjacentHTML('beforeend', `${bodySection(bodyweight, 'all')}${goalsSection(all, bodyweight)}`);
+      root.querySelector('.page').insertAdjacentHTML('beforeend', `${bodySection(bodyweight, 'all')}${premium ? goalsSection(all, bodyweight) : ''}`);
     }
 
     const slot = root.querySelector('[data-slot="period"]');
     if (slot) slot.appendChild(UI.segmented(PERIODS, period, (v) => { state.period = v; setTimeout(() => Router().refresh(), 180); }, { label: 'Período' }));
     bindCalendar(root, all);
+    if (!empty && premium) global.Balance.bind(root, all);
     bindCommon(root);
     bindBadges(root);
     // Largura real só existe depois que a tela entra no documento

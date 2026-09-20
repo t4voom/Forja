@@ -440,9 +440,9 @@
 
     const body = U.h(`
       <div>
-        <div class="flex flex-wrap gap-2">
+        <div class="ex-actions">
           <button type="button" class="btn btn-secondary btn-sm fav-btn" data-fav aria-pressed="${isFavorite(id)}">${favLabel(isFavorite(id))}</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-add>${icon('plus', { size: 17, stroke: 2 })}<span>Adicionar a um treino</span></button>
+          <button type="button" class="btn btn-secondary btn-sm" data-add aria-label="Adicionar a um treino">${icon('plus', { size: 17, stroke: 2 })}<span>Adicionar</span></button>
         </div>
 
         ${ex.notes ? `<p class="t-eyebrow mt-8">Observação</p><p class="t-body mt-2 whitespace-pre-line">${esc(ex.notes)}</p>` : ''}
