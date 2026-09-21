@@ -4,7 +4,9 @@
    · Sheets → Google Planilhas via Apps Script (backend/apps-script/Code.gs).
               O localStorage continua sendo a fonte do app (rápido e offline);
               cada alteração é enviada para a planilha alguns segundos depois (Sync).
-   Sessão do aparelho: forja.session = { token, user: { id, email, name, plan, createdAt }, at } */
+   Sessão do aparelho: forja.session = { token, user: { id, email, name, plan, createdAt, account }, at }
+   · user.account vem do servidor (tipoConta, origemPremium, academia, assinaturaIndividual...).
+     O que fica no localStorage é só cache: o servidor recalcula tudo a cada abertura (refresh). */
 (function (global) {
   'use strict';
   const CFG = global.FORJA_CONFIG || {};
@@ -75,6 +77,24 @@
     network: 'Sem conexão com o servidor. Verifique a internet e tente de novo.',
     config: 'O Google Planilhas ainda não foi configurado (sheetsUrl em js/config.js).',
     plan_locked: 'A mudança de plano está bloqueada no servidor.',
+    payment_unavailable: 'A assinatura pelo app ainda não está disponível.',
+    account_blocked: 'Esta conta está bloqueada. Fale com o suporte.',
+    too_many_attempts: 'Muitas tentativas erradas. Espere 15 minutos e tente de novo.',
+    server_only: 'Disponível só com a conta conectada ao servidor.',
+    code_invalid: 'Código não encontrado. Confira e tente de novo.',
+    code_inactive: 'Este código não está mais ativo.',
+    code_expired: 'Este código expirou.',
+    code_exhausted: 'Este código já atingiu o limite de utilizações.',
+    code_used: 'Você já usou este código.',
+    academy_code: 'Este é um código de academia. Use a opção “Entrar com código da academia”.',
+    premium_code: 'Este é um código Premium. Use a opção “Resgatar código Premium”.',
+    academy_code_invalid: 'Código de academia não encontrado. Confira com a sua academia.',
+    academy_inactive: 'Esta academia não está ativa no FORJA.',
+    academy_contract: 'O contrato desta academia com o FORJA não está válido. Fale com a academia.',
+    academy_full: 'Esta academia atingiu o limite de alunos contratados.',
+    academy_already: 'Você já faz parte desta academia.',
+    academy_other: 'Você já está vinculado a outra academia. Saia dela antes de entrar em uma nova.',
+    not_in_academy: 'Você não está vinculado a nenhuma academia.',
     server: 'O servidor não respondeu como esperado. Tente de novo.'
   };
   class BackendError extends Error {
@@ -83,7 +103,9 @@
 
   const normEmail = (e) => String(e || '').trim().toLowerCase();
   const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
-  const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, plan: u.plan || 'free', createdAt: u.createdAt });
+  // Conta local (sem servidor): Premium, academia e códigos não existem neste modo
+  const LOCAL_ACCOUNT = Object.freeze({ tipoConta: 'FREE', origemPremium: 'NENHUMA', statusPremium: 'INATIVO', premium: { ativo: false, origem: 'NENHUMA' }, academia: { vinculada: false, id: null }, assinaturaIndividual: null, codigoPremium: null });
+  const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, plan: u.plan || 'free', createdAt: u.createdAt, account: LOCAL_ACCOUNT });
 
   function validate({ name, email, password }, { signup = false } = {}) {
     if (signup && !String(name || '').trim()) throw new BackendError('invalid_name');
@@ -126,15 +148,11 @@
 
     async logout() {},
 
-    async setPlan(token, userId, plan) {
-      const list = Local.accounts();
-      const a = list.find((x) => x.id === userId);
-      if (!a) throw new BackendError('invalid_session');
-      a.plan = plan;
-      a.planUpdatedAt = nowISO();
-      Local.save(list);
-      return publicUser(a);
-    },
+    // Sem servidor não há pagamento, código nem academia
+    async setPlan() { throw new BackendError('payment_unavailable'); },
+    async redeemPremiumCode() { throw new BackendError('server_only'); },
+    async joinAcademy() { throw new BackendError('server_only'); },
+    async leaveAcademy() { throw new BackendError('server_only'); },
 
     // Os dados já vivem no aparelho: não há o que baixar nem enviar
     async pull() { return null; },
@@ -171,8 +189,12 @@
     async me(token) { return (await call('me', { token })).user; },
     async logout(token) { await call('logout', { token }); },
     async setPlan(token, userId, plan) { return (await call('setPlan', { token, plan })).user; },
-    async pull(token) { return (await call('pull', { token })).data || {}; },
-    async push(token, data) { await call('push', { token, data }); return true; },
+    async redeemPremiumCode(token, code) { return (await call('redeemPremiumCode', { token, code })).user; },
+    async joinAcademy(token, code) { return (await call('joinAcademy', { token, code })).user; },
+    async leaveAcademy(token) { return (await call('leaveAcademy', { token })).user; },
+    async pull(token, keys) { return (await call('pull', keys ? { token, keys } : { token })).data || {}; },
+    // Devolve { workouts } quando o servidor preservou treinos do treinador
+    async push(token, data) { return call('push', { token, data }); },
     async clear(token) { await call('clear', { token }); return true; }
   };
 
@@ -185,6 +207,7 @@
   const token = () => (session() || {}).token;
   function saveSession(tok, user) { writeJSON(SESSION_KEY, { token: tok, user, at: nowISO() }); return user; }
   function setSessionUser(user) { const s = session(); if (s) writeJSON(SESSION_KEY, Object.assign(s, { user })); return user; }
+  function requireToken() { const t = token(); if (!t) throw new BackendError('invalid_session'); return t; }
 
   const Backend = {
     mode: adapter.name,
@@ -218,7 +241,15 @@
       return setSessionUser(await adapter.setPlan(s.token, s.user.id, plan));
     },
 
-    pull: () => adapter.pull(token()),
+    // Situação da conta como o servidor informou por último (cache; quem decide é o servidor)
+    account() { return ((session() || {}).user || {}).account || LOCAL_ACCOUNT; },
+
+    // Código Premium (promoção, parceiro, teste) e código da academia são coisas diferentes
+    async redeemPremiumCode(code) { return setSessionUser(await adapter.redeemPremiumCode(requireToken(), String(code || '').trim())); },
+    async joinAcademy(code) { return setSessionUser(await adapter.joinAcademy(requireToken(), String(code || '').trim())); },
+    async leaveAcademy() { return setSessionUser(await adapter.leaveAcademy(requireToken())); },
+
+    pull: (keys) => adapter.pull(token(), keys),
     push: (data) => adapter.push(token(), data),
     clearRemote: () => adapter.clear(token())
   };
@@ -255,7 +286,11 @@
       keys.forEach((k) => { data[k] = global.Store.get(k); });
       setState('syncing');
       inFlight = Backend.push(data)
-        .then(() => setState(pending.size ? 'pending' : 'idle'))
+        .then((res) => {
+          // O servidor manteve os treinos do treinador: aplica a versão dele
+          if (res && res.workouts && global.Workouts && global.Workouts.applyRemote(res.workouts) && global.App) global.App.Router.refresh();
+          setState(pending.size ? 'pending' : 'idle');
+        })
         .catch((e) => {
           keys.forEach((k) => pending.add(k));
           setState('offline');

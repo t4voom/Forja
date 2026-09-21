@@ -1,8 +1,11 @@
 /* FORJA — treinos (modelos)
    Formato: { id, name, description, color, order, createdAt, updatedAt,
-              exercises: [{ id, exerciseId, name, muscle, sets, repMin, repMax, group }] }
+              exercises: [{ id, exerciseId, name, muscle, sets, repMin, repMax, group, loadKg?, restSec?, notes? }],
+              muscleGroup?, managed?, managedBy?: { trainerId, trainerName, academiaId, academiaName, at }, releasedFrom? }
    · name/muscle ficam salvos no item como reserva; o nome exibido vem sempre da biblioteca.
-   · Toda alteração é salva na hora (Store). Exclusões oferecem "Desfazer". */
+   · Toda alteração é salva na hora (Store). Exclusões oferecem "Desfazer".
+   · Treinos com managed = true foram montados pelo treinador da academia (FORJA Trainer).
+     No app eles são somente leitura; o servidor não deixa o app sobrescrevê-los (ver applyRemote). */
 (function (global) {
   'use strict';
   const { Store, U, UI } = global;
@@ -43,6 +46,56 @@
   const exerciseCount = (w) => U.plural((w.exercises || []).length, 'exercício', 'exercícios');
   const totalSets = (w) => (w.exercises || []).reduce((sum, x) => sum + (x.sets || 0), 0);
   const scheme = (x) => `${x.sets} × ${x.repMin === x.repMax ? x.repMin : `${x.repMin}–${x.repMax}`}`;
+  const isManaged = (w) => !!(w && w.managed);
+  const fmtRest = (sec) => (sec >= 60 ? `${Math.floor(sec / 60)} min${sec % 60 ? ` ${sec % 60} s` : ''}` : `${sec} s`);
+  // Carga, descanso e observação definidos pelo treinador
+  const hasPrescription = (x) => x.loadKg != null || x.restSec != null || !!x.notes;
+  const prescriptionText = (x) => [x.loadKg != null ? U.fmtWeight(x.loadKg) : '', x.restSec != null ? `descanso ${fmtRest(x.restSec)}` : ''].filter(Boolean).join(' · ');
+
+  /* ==========================================================================
+     Treinos do treinador (servidor)
+     ========================================================================== */
+  // Mesma regra do servidor (Code.gs › mergeWorkouts_): o treinador manda nos treinos gerenciados,
+  // o aluno manda nos dele. Treinos gerenciados que o servidor não tem mais: excluídos pelo treinador
+  // (somem) ou devolvidos ao aluno quando ele saiu da academia (vale a versão do servidor).
+  function mergeRemote(local, server) {
+    const byId = new Map(server.filter(Boolean).map((w) => [w.id, w]));
+    const out = [];
+    const used = new Set();
+    local.forEach((w) => {
+      const s = byId.get(w.id);
+      if (s && s.managed) { out.push(s); used.add(w.id); return; }
+      if (w.managed) { if (s) { out.push(s); used.add(w.id); } return; }
+      out.push(w);
+      used.add(w.id);
+    });
+    server.forEach((s) => { if (s && s.managed && !used.has(s.id)) { out.push(s); used.add(s.id); } });
+    return out;
+  }
+
+  // Aplica a lista vinda do servidor sem disparar um novo envio. Devolve true se algo mudou.
+  function applyRemote(server) {
+    if (!Array.isArray(server)) return false;
+    const local = Store.get('workouts');
+    const next = mergeRemote(local, server);
+    if (JSON.stringify(next) === JSON.stringify(local)) return false;
+    const before = JSON.stringify(local.filter(isManaged));
+    Store.importAll({ workouts: next });
+    if (JSON.stringify(next.filter(isManaged)) !== before) {
+      UI.toast('Seu treinador atualizou seus treinos', { iconName: 'dumbbell', duration: 4000 });
+    }
+    return true;
+  }
+
+  function managedNoteHTML(w) {
+    if (w.managed && w.managedBy) {
+      return `<p class="managed-note">${icon('user', { size: 15, stroke: 2 })}<span>Montado por <strong>${esc(w.managedBy.trainerName || 'seu treinador')}</strong>${w.managedBy.academiaName ? ` · ${esc(w.managedBy.academiaName)}` : ''}</span></p>`;
+    }
+    if (w.releasedFrom) {
+      return `<p class="t-footnote mt-3">Montado por ${esc(w.releasedFrom.trainerName || 'seu treinador')}${w.releasedFrom.academiaName ? ` na ${esc(w.releasedFrom.academiaName)}` : ''}. Agora o treino é seu.</p>`;
+    }
+    return '';
+  }
 
   // Rotação: o treino seguinte ao último realizado; sem histórico, o primeiro da lista
   function next() {
@@ -85,7 +138,7 @@
   function update(id, patchOrFn) {
     Store.update('workouts', (ws) => {
       const w = ws.find((x) => x.id === id);
-      if (!w) return;
+      if (!w || w.managed) return; // treino do treinador: só ele altera
       if (typeof patchOrFn === 'function') patchOrFn(w);
       else Object.assign(w, patchOrFn);
       w.updatedAt = now();
@@ -106,6 +159,10 @@
     if (!src) return null;
     const ids = all().map((w) => w.id);
     const copy = U.clone(src);
+    // A cópia é do aluno, mesmo quando o original é do treinador
+    delete copy.managed;
+    delete copy.managedBy;
+    delete copy.releasedFrom;
     copy.id = U.uid('w_');
     copy.name = `${src.name} (cópia)`.slice(0, 40);
     copy.createdAt = copy.updatedAt = now();
@@ -119,7 +176,7 @@
   // Exclui na hora e oferece desfazer (restaura na mesma posição)
   function remove(id) {
     const w = get(id);
-    if (!w) return;
+    if (!w || w.managed) return;
     const ids = all().map((x) => x.id);
     Store.update('workouts', (ws) => ws.filter((x) => x.id !== id));
     UI.toast(`${w.name} excluído`, {
@@ -291,10 +348,34 @@
   /* ==========================================================================
      Configuração de um exercício no treino (séries × repetições)
      ========================================================================== */
+  // Exercício de um treino do treinador: só consulta
+  function openManagedItem(w, item) {
+    const info = global.Exercises.resolve(item);
+    const row = (label, value) => `<div class="row"><span class="row-main row-title">${label}</span><span class="row-value num">${value}</span></div>`;
+    const body = U.h(`
+      <div>
+        <p class="scheme-preview num">${scheme(item)}</p>
+        <div class="group mt-6">
+          ${row('Séries', item.sets)}
+          ${row('Repetições', item.repMin === item.repMax ? item.repMin : `${item.repMin} a ${item.repMax}`)}
+          ${item.loadKg != null ? row('Carga', esc(U.fmtWeight(item.loadKg))) : ''}
+          ${item.restSec != null ? row('Descanso', esc(fmtRest(item.restSec))) : ''}
+        </div>
+        ${item.notes ? `<p class="t-eyebrow group-label mt-6">Observação do treinador</p><div class="group"><p class="row managed-obs">${esc(item.notes)}</p></div>` : ''}
+        <p class="t-footnote group-note">Definido por ${esc((w.managedBy || {}).trainerName || 'seu treinador')}. Para mudar, fale com ele.</p>
+        <div class="group mt-8 has-icons">
+          <button type="button" class="row" data-view><span class="row-icon">${icon('info', { size: 20 })}</span><span class="row-main row-title">Ver exercício</span></button>
+        </div>
+      </div>`);
+    UI.openSheet({ title: info.name, subtitle: [info.muscle, info.equipment].filter(Boolean).join(' · '), body });
+    body.querySelector('[data-view]').addEventListener('click', () => global.Exercises.openDetail(item.exerciseId));
+  }
+
   function openItem(wid, itemId) {
     const w = get(wid);
     const item = w && w.exercises.find((x) => x.id === itemId);
     if (!item) return;
+    if (w.managed) return openManagedItem(w, item);
     const info = global.Exercises.resolve(item);
     const cur = { sets: item.sets, repMin: item.repMin, repMax: item.repMax };
 
@@ -412,7 +493,7 @@
             ${list.map((w, i) => `
               <article class="workout-card" data-sort-item data-id="${esc(w.id)}" style="--tint:${esc(w.color || 'var(--accent)')};--i:${i}">
                 <button type="button" class="workout-card-main" data-open ${org ? 'tabindex="-1"' : ''}>
-                  ${!org && nextW && nextW.id === w.id ? '<span class="badge">Próximo</span>' : ''}
+                  ${!org && (nextW && nextW.id === w.id || w.managed) ? `<span class="workout-card-badges">${nextW && nextW.id === w.id ? '<span class="badge">Próximo</span>' : ''}${w.managed ? `<span class="badge is-trainer">${icon('user', { size: 11, stroke: 2.4 })} Treinador</span>` : ''}</span>` : ''}
                   <span class="workout-card-name">${esc(w.name)}</span>
                   <span class="workout-card-meta">${esc(muscleSummary(w) || 'Sem exercícios ainda')}</span>
                   <span class="workout-card-count">${exerciseCount(w)}${w.exercises.length ? ` · ${U.plural(totalSets(w), 'série', 'séries')}` : ''}</span>
@@ -474,9 +555,10 @@
     }
 
     const items = w.exercises;
-    if (items.length < 2 && organizing.detail) organizing.detail = false;
+    const managed = isManaged(w);
+    if ((items.length < 2 || managed) && organizing.detail) organizing.detail = false;
     const org = organizing.detail;
-    const muscles = muscleSummary(w, 4);
+    const muscles = w.muscleGroup || muscleSummary(w, 4);
 
     root.innerHTML = `
       ${navbarHTML(w.name, `<button class="icon-btn" data-menu aria-label="Mais opções">${icon('more', { size: 20 })}</button>`)}
@@ -486,6 +568,7 @@
           <h1 class="t-large-title mt-4" data-large-title>${esc(w.name)}</h1>
           ${w.description ? `<p class="t-sub mt-2">${esc(w.description)}</p>` : ''}
           <p class="t-callout mt-3">${[muscles, exerciseCount(w), items.length ? U.plural(totalSets(w), 'série', 'séries') : ''].filter(Boolean).map(esc).join(' · ')}</p>
+          ${managedNoteHTML(w)}
         </header>
 
         ${items.length ? `<button class="btn btn-primary btn-block mt-8" data-start>${icon('play', { size: 16, stroke: 2 })} ${global.Sessions.active()?.workoutId === w.id ? 'Continuar treino' : 'Começar treino'}</button>` : ''}
@@ -493,7 +576,7 @@
         <div class="section">
           <div class="section-head">
             <p class="t-eyebrow">Exercícios</p>
-            ${items.length > 1 ? `<button class="text-btn" data-organize>${org ? 'OK' : 'Organizar'}</button>` : ''}
+            ${items.length > 1 && !managed ? `<button class="text-btn" data-organize>${org ? 'OK' : 'Organizar'}</button>` : ''}
           </div>
 
           ${items.length ? `
@@ -507,6 +590,7 @@
                   <button type="button" class="row-main item-main" data-edit ${org ? 'tabindex="-1"' : ''}>
                     <span class="row-title clamp-2">${esc(info.name)}</span>
                     <span class="row-sub block">${esc([info.muscle, info.equipment].filter(Boolean).join(' · '))}</span>
+                    ${hasPrescription(x) ? `<span class="row-sub block item-rx">${esc(prescriptionText(x))}${x.notes ? `${prescriptionText(x) ? ' · ' : ''}${icon('info', { size: 12, stroke: 2.2, cls: 'inline-icon' })} obs.` : ''}</span>` : ''}
                   </button>
                   ${org ? moveButtons(i, items.length) : `<span class="item-scheme num">${scheme(x)}</span>`}
                 </li>`;
@@ -515,10 +599,10 @@
             <div class="empty">
               <div class="empty-icon">${icon('list', { size: 24 })}</div>
               <p class="empty-title">Nenhum exercício ainda</p>
-              <p class="empty-text">Escolha os exercícios deste treino na biblioteca.</p>
+              <p class="empty-text">${managed ? 'Seu treinador ainda não adicionou exercícios.' : 'Escolha os exercícios deste treino na biblioteca.'}</p>
             </div>`}
 
-          ${org ? '' : `<button class="btn ${items.length ? 'btn-secondary' : 'btn-primary'} btn-block mt-4" data-add>${icon('plus', { size: 18, stroke: 2 })} Adicionar exercícios</button>`}
+          ${org || managed ? '' : `<button class="btn ${items.length ? 'btn-secondary' : 'btn-primary'} btn-block mt-4" data-add>${icon('plus', { size: 18, stroke: 2 })} Adicionar exercícios</button>`}
         </div>
       </section>`;
 
@@ -546,6 +630,18 @@
   function openMenu(id) {
     const w = get(id);
     if (!w) return;
+    if (w.managed) {
+      return UI.actionSheet({
+        title: w.name,
+        subtitle: 'Treino montado pelo seu treinador',
+        actions: [
+          { label: 'Duplicar como meu treino', icon: 'copy', onSelect: () => {
+            if (!global.Plans.canCreateWorkout()) return global.Plans.openPaywall('workouts');
+            const c = duplicate(id); Router().go(`workouts/${c.id}`); UI.toast('Cópia criada. Essa você pode editar.');
+          } }
+        ]
+      });
+    }
     UI.actionSheet({
       title: w.name,
       actions: [
@@ -561,6 +657,7 @@
 
   global.Workouts = {
     COLORS, all, get, next, muscleSummary, exerciseCount, totalSets, scheme,
+    isManaged, fmtRest, prescriptionText, mergeRemote, applyRemote,
     create, update, duplicate, remove, moveWorkout, addExercises, updateItem, removeItem, moveItem, replaceItem, replaceExercise,
     openCreate, openForm, openAddExercises, openItem, renderScreen
   };

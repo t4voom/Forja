@@ -206,7 +206,7 @@
     const ids = new Set(workoutIds());
     Store.update('workouts', (ws) => {
       ws.forEach((w) => {
-        if (!ids.has(w.id)) return;
+        if (!ids.has(w.id) || w.managed) return; // treino assumido pelo treinador não segue mais o programa
         (w.exercises || []).forEach((x) => {
           if (!x.base || x.manual) return;
           Object.assign(x, applyPhase(x.base, !!x.main, phase));
@@ -303,7 +303,7 @@
     const ids = new Set(workoutIds(s));
     Store.update('workouts', (ws) => {
       ws.forEach((w) => {
-        if (!ids.has(w.id)) return;
+        if (!ids.has(w.id) || w.managed) return;
         delete w.programId;
         w.description = '';
         (w.exercises || []).forEach((x) => {

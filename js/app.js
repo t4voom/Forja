@@ -69,6 +69,25 @@
   // Valor de peso para exibir em um campo editável (na unidade atual)
   const weightInputValue = (kg) => (kg ? U.fmtNum(U.round(U.toUnit(kg), 1), 1).replace(/\./g, '') : '');
 
+  // Idade: calculada pela data de nascimento; sem ela, a idade digitada à mão (profile.age)
+  function ageOf(p) {
+    if (p.birthDate) {
+      const [y, m, d] = p.birthDate.split('-').map(Number);
+      const now = new Date();
+      let a = now.getFullYear() - y;
+      if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) a--;
+      return a >= 0 ? a : null;
+    }
+    return Number.isFinite(p.age) ? p.age : null;
+  }
+
+  // IMC é sempre calculado (nunca salvo), com peso e altura válidos
+  function bmiOf(p) {
+    const kg = p.weightKg, cm = p.heightCm;
+    if (!(kg >= WEIGHT_KG.min && kg <= WEIGHT_KG.max && cm >= HEIGHT_CM.min && cm <= HEIGHT_CM.max)) return null;
+    return U.round(kg / ((cm / 100) ** 2), 1);
+  }
+
   /* ==========================================================================
      Tema e preferências visuais
      ========================================================================== */
@@ -279,10 +298,13 @@
               <div class="group has-icons">
                 ${row('weight', 'Peso', p.weightKg ? U.fmtWeight(p.weightKg) : '', 'scale')}
                 ${row('height', 'Altura', p.heightCm ? `${p.heightCm} cm` : '', 'ruler')}
+                ${row('age', 'Idade', ageOf(p) != null ? U.plural(ageOf(p), 'ano', 'anos') : '', 'user')}
                 ${row('goal', 'Objetivo', esc(labelOf(GOALS, p.goal)), 'target')}
                 ${row('experience', 'Experiência', esc(labelOf(EXPERIENCE, p.experience)), 'bolt')}
                 ${row('birthDate', 'Aniversário', p.birthDate ? fmtBirthday(p.birthDate) : '', 'gift')}
               </div>
+              ${bmiOf(p) != null ? `<p class="t-footnote group-note">IMC ${U.fmtNum(bmiOf(p), 1)} · calculado com seu peso e altura atuais.</p>` : ''}
+              ${(global.Plans.account().academia || {}).vinculada ? `<p class="t-footnote group-note">Seu treinador na ${esc(global.Plans.account().academia.nome)} vê seu peso, altura e idade.</p>` : ''}
             </div>
 
             <div class="section" style="--i:2">
@@ -304,9 +326,16 @@
                 <button class="row" data-go="profile/plan">
                   <span class="row-icon">${icon('crown', { size: 20 })}</span>
                   <span class="row-main row-title">Plano</span>
-                  <span class="row-value">${global.Plans.isPremium() ? '<span class="t-accent">Premium</span>' : 'Free'}</span>
+                  <span class="row-value">${global.Plans.isPremium() ? `<span class="t-accent">${esc(global.Plans.originLabel())}</span>` : 'Free'}</span>
                   ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
                 </button>
+                ${global.Backend.mode === 'sheets' ? `
+                <button class="row" data-go="profile/plan">
+                  <span class="row-icon">${icon('dumbbell', { size: 20 })}</span>
+                  <span class="row-main row-title">Academia</span>
+                  <span class="row-value">${(global.Plans.account().academia || {}).vinculada ? esc(global.Plans.account().academia.nome) : '<span class="t-faint">Entrar com código</span>'}</span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>` : ''}
                 <div class="row">
                   <span class="row-icon">${icon('user', { size: 20 })}</span>
                   <span class="row-main row-title">E-mail</span>
@@ -451,6 +480,18 @@
         UI.choiceSheet({ title: 'Experiência', options: EXPERIENCE, value: p.experience, onSelect: (experience) => Profile.save({ experience }) });
       } else if (field === 'birthDate') {
         Profile.editBirthday(p.birthDate || '');
+      } else if (field === 'age') {
+        // Com data de nascimento a idade é calculada; editar a data é o caminho
+        if (p.birthDate) return Profile.editBirthday(p.birthDate);
+        UI.inputSheet({
+          title: 'Idade', subtitle: 'Se preferir, informe a data de nascimento em Aniversário: a idade passa a ser calculada.',
+          value: Number.isFinite(p.age) ? String(p.age) : '', placeholder: '25', suffix: 'anos', inputmode: 'numeric', maxlength: 3,
+          validate: (v) => {
+            const n = Number(String(v).trim());
+            return Number.isInteger(n) && n >= 10 && n <= 120 ? { ok: true, value: n } : { ok: false, error: 'Informe uma idade entre 10 e 120 anos.' };
+          },
+          onSave: (age) => Profile.save({ age })
+        });
       }
     },
 
@@ -462,7 +503,7 @@
           <label class="form-label" for="birth">Data de nascimento</label>
           <input id="birth" class="field" type="date" min="1900-01-01" max="${today}" value="${esc(value)}">
           <p class="field-error" data-err></p>
-          <p class="t-footnote mx-1">Usada apenas para a conquista “Treino de aniversário”. Fica só neste aparelho.</p>
+          <p class="t-footnote mx-1">Usada para calcular sua idade e para a conquista “Treino de aniversário”. Fica salva na sua conta.</p>
           ${value ? '<button type="button" class="btn btn-ghost is-muted btn-block mt-4" data-clear>Remover data</button>' : ''}
         </form>`);
       const footer = U.h('<button type="button" class="btn btn-primary btn-block">Salvar</button>');
@@ -934,6 +975,47 @@
   })();
 
   /* ==========================================================================
+     Servidor: situação da conta e treinos do treinador
+     O app puxa os treinos ao abrir e sempre que volta ao primeiro plano (no máximo 1× por minuto),
+     então o que o treinador salvar no FORJA Trainer aparece aqui sem precisar sair e entrar.
+     ========================================================================== */
+  const Remote = (() => {
+    let last = 0;
+    let busy = false;
+
+    async function sync({ force = false, account = true } = {}) {
+      if (!global.Sync.enabled() || busy) return;
+      if (!force && Date.now() - last < 60000) return;
+      busy = true;
+      last = Date.now();
+      try {
+        if (account) {
+          const before = global.Backend.user() || {};
+          const u = await global.Backend.refresh();
+          if (u && (u.plan !== before.plan || JSON.stringify(u.account) !== JSON.stringify(before.account))) {
+            global.Plans.applyUser(u);
+            if (started) Router.refresh();
+          }
+        }
+        const data = await global.Backend.pull(['workouts']);
+        if (data && Array.isArray(data.workouts) && global.Workouts.applyRemote(data.workouts) && started) Router.refresh();
+      } catch (e) {
+        if (e.code === 'invalid_session') location.reload();
+      } finally {
+        busy = false;
+      }
+    }
+
+    function start() {
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+      global.addEventListener('online', () => sync());
+      sync({ force: true, account: false }); // a conta já foi atualizada em Auth.start
+    }
+
+    return { sync, start };
+  })();
+
+  /* ==========================================================================
      Inicialização
      ========================================================================== */
   let started = false;
@@ -946,6 +1028,7 @@
     $('#app').hidden = false;
     $('#active-bar').addEventListener('click', () => Sessions.open());
     Router.start();
+    Remote.start();
     Sessions.syncClock();
     if (global.Plans.isPremium()) global.Reminders.start();
     if (choice === 'create') setTimeout(() => Workouts.openCreate(), 350);
@@ -985,7 +1068,7 @@
     });
   }
 
-  global.App = { Router, Home, Profile, Validate, GOALS, EXPERIENCE, applyTheme, logBodyweight };
+  global.App = { Router, Home, Profile, Validate, GOALS, EXPERIENCE, applyTheme, logBodyweight, ageOf, bmiOf, syncRemote: Remote.sync };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

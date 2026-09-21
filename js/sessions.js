@@ -166,15 +166,20 @@
   function entryFor(item) {
     const info = global.Exercises.resolve(item);
     const lp = lastPerformance(item.exerciseId);
+    // Sem histórico, a carga indicada pelo treinador é o ponto de partida
+    const rxLoad = item.loadKg != null ? item.loadKg : null;
     const sets = Array.from({ length: item.sets }, (_, i) => {
       const ref = lp ? (lp.sets[i] || lp.sets[lp.sets.length - 1]) : null;
-      const plan = { weightKg: ref ? ref.weightKg : null, reps: ref ? ref.reps : item.repMin };
+      const plan = { weightKg: ref ? ref.weightKg : rxLoad, reps: ref ? ref.reps : item.repMin };
       return { id: U.uid('s_'), weightKg: plan.weightKg, reps: plan.reps, plan, type: 'normal', done: false };
     });
-    return {
+    const entry = {
       id: U.uid('se_'), exerciseId: item.exerciseId, name: info.name, muscle: info.muscle, equipment: info.equipment || '',
       target: { sets: item.sets, repMin: item.repMin, repMax: item.repMax }, sets
     };
+    // Prescrição do treinador (só exibida; o FORJA não tem cronômetro de descanso)
+    if (item.loadKg != null || item.restSec != null || item.notes) entry.rx = { loadKg: rxLoad, restSec: item.restSec != null ? item.restSec : null, notes: item.notes || '' };
+    return entry;
   }
 
   function startWorkout(workoutId) {
@@ -502,6 +507,11 @@
             <button type="button" class="swap-btn" data-swap aria-label="Trocar exercício">${icon('swap', { size: 15, stroke: 2 })} Trocar</button>
           </div>
           ${ex.swappedFrom ? `<p class="t-footnote mt-1">No lugar de ${esc((global.Exercises.get(ex.swappedFrom) || {}).name || 'outro exercício')}</p>` : ''}
+          ${ex.rx ? `
+            <div class="tr-rx">
+              ${global.Workouts.prescriptionText(ex.rx) ? `<p class="tr-rx-line">${icon('user', { size: 13, stroke: 2.2 })} ${esc(global.Workouts.prescriptionText(ex.rx))}</p>` : ''}
+              ${ex.rx.notes ? `<p class="tr-rx-notes">${esc(ex.rx.notes)}</p>` : ''}
+            </div>` : ''}
 
           ${coach && !global.Plans.isPremium() ? `
             <button type="button" class="coach coach-locked" data-paywall="coach">

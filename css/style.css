@@ -2897,3 +2897,35 @@ button.row:active, a.row:active, .row.is-tappable:active { background: var(--fil
 /* Ficha do exercício: dois botões lado a lado */
 .ex-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ex-actions .btn { width: 100%; padding: 0 12px; }
+
+/* ==========================================================================
+   Treinos do treinador (FORJA Trainer) e academia
+   ========================================================================== */
+.workout-card-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.workout-card-badges .badge { margin: 0; }
+.badge.is-trainer { gap: 4px; background: var(--surface-2); color: var(--text); }
+.managed-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.3;
+}
+[data-theme="dark"] .managed-note { box-shadow: 0 0 0 0.5px var(--hairline); }
+.managed-note svg { flex: none; color: var(--accent); }
+.managed-note strong { color: var(--text); font-weight: 600; }
+.managed-obs { display: block; white-space: pre-wrap; font-size: 15px; line-height: 1.45; min-height: 0; padding-top: 12px; padding-bottom: 12px; }
+.item-rx { color: var(--accent); }
+.tr-rx { margin-top: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--fill-2); }
+.tr-rx-line { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--text); }
+.tr-rx-line svg { color: var(--accent); }
+.tr-rx-notes { margin-top: 4px; font-size: 14px; line-height: 1.4; color: var(--text-2); white-space: pre-wrap; }
+.tr-rx-line + .tr-rx-notes { margin-top: 6px; }
+.code-field { text-transform: uppercase; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
+.code-field::placeholder { text-transform: none; letter-spacing: normal; }
+.plan-origin strong { color: var(--text); font-weight: 600; }

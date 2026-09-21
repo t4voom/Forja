@@ -16,10 +16,15 @@
     if (s && s.user && s.user.id) {
       Store.useUser(s.user.id);
       done(s.user, {});
-      // Plano e nome podem ter mudado no servidor (ex.: pagamento). Sem internet, segue com o que tem.
+      // Plano, academia e nome podem ter mudado no servidor (assinatura, código, vínculo encerrado...).
+      // O Premium guardado no aparelho é só cache: vale o que o servidor responder. Sem internet, segue com o que tem.
       if (Backend.mode === 'sheets') {
         Backend.refresh().then((u) => {
-          if (u && u.plan !== s.user.plan && global.App) global.App.Router.refresh();
+          if (!u) return;
+          if (u.plan !== s.user.plan || JSON.stringify(u.account) !== JSON.stringify(s.user.account)) {
+            global.Plans.applyUser(u);
+            if (global.App) global.App.Router.refresh();
+          }
         }).catch(() => {
           UI.toast(Backend.MESSAGES.invalid_session, { iconName: 'info', duration: 5000 });
           setTimeout(() => location.reload(), 1500);

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="robots" content="noindex">
+  <meta name="description" content="FORJA Trainer — gestão de alunos e treinos para academias.">
+  <title>FORJA Trainer</title>
+  <link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+
+  <!-- Tema antes da primeira pintura (preferência local, não é dado de negócio) -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('forja.trainer.theme') || 'dark';
+        if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="css/trainer.css">
+</head>
+<body>
+  <div id="root"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <!-- Reaproveitado do app FORJA: configuração (URL do Apps Script), utilitários/ícones e a biblioteca de exercícios -->
+  <script src="../js/config.js"></script>
+  <script src="../js/utils.js"></script>
+  <script>
+    // A biblioteca de exercícios do app lê os exercícios personalizados do Store.
+    // No Dashboard, o "Store" só guarda os personalizados do aluno aberto (vindos da API).
+    window.Store = (function () {
+      var custom = [];
+      return {
+        get: function (key) { return key === 'exercises' ? custom : key === 'settings' ? { unit: 'kg' } : []; },
+        update: function () {}, set: function () {},
+        setCustomExercises: function (list) { custom = Object.freeze((list || []).slice()); }
+      };
+    })();
+  </script>
+  <script src="../js/exercises.js"></script>
+
+  <script src="js/api.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/views.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
